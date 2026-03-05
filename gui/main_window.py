@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QStackedWidget, QFrame, QSizePolicy
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QFont, QColor, QPixmap
 
 from config import (
@@ -274,25 +274,19 @@ class MainWindow(QMainWindow):
             btn.setActive(i == index)
         self._stack.setCurrentIndex(index)
 
-        if index == 0:
-            self._dashboard_page.refresh()
-        elif index == 1:
-            self._mitarbeiter_page.refresh()
-        elif index == 2:
-            self._dienstliches_page.refresh()
-        elif index == 3:
-            self._aufgaben_tag_page.refresh()
-        elif index == 4:
-            self._aufgaben_page.refresh()
-        elif index == 5:
-            self._dienstplan_page.reload_tree()
-        elif index == 6:
-            self._uebergabe_page.refresh()
-        elif index == 7:
-            self._fahrzeuge_page.refresh()
-        elif index == 8:
-            self._code19_page.refresh()
-        elif index == 9:
-            self._ausdrucke_page.refresh()
-        elif index == 10:
-            self._krankmeldungen_page.refresh()
+        # Refresh nach dem Seitenumbruch aufrufen (UI reagiert sofort)
+        page_map = {
+            0: self._dashboard_page.refresh,
+            1: self._mitarbeiter_page.refresh,
+            2: self._dienstliches_page.refresh,
+            3: self._aufgaben_tag_page.refresh,
+            4: self._aufgaben_page.refresh,
+            5: self._dienstplan_page.reload_tree,
+            6: self._uebergabe_page.refresh,
+            7: self._fahrzeuge_page.refresh,
+            8: self._code19_page.refresh,
+            9: self._ausdrucke_page.refresh,
+            10: self._krankmeldungen_page.refresh,
+        }
+        if index in page_map:
+            QTimer.singleShot(0, page_map[index])
