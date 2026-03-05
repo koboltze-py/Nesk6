@@ -197,6 +197,9 @@ class MitarbeiterWidget(QWidget):
         self._alle: list[Mitarbeiter] = []
         self._ausgeschlossen_set: set = set()
         self._load_worker: _LoadWorker | None = None
+        self._gefiltert: list[Mitarbeiter] = []   # aktuell gefiltertes Gesamtergebnis
+        self._angezeigt: int = 0                  # wie viele Zeilen gerade in der Tabelle
+        self._PAGE_SIZE = 50
         self._build_ui()
         # refresh() wird von MitarbeiterHauptWidget.refresh() aufgerufen
 
@@ -281,6 +284,18 @@ class MitarbeiterWidget(QWidget):
         self._table.setStyleSheet("background-color: white; border-radius: 6px;")
         layout.addWidget(self._table)
 
+        self._mehr_btn = QPushButton("▼  Nächste 50 laden")
+        self._mehr_btn.setFixedHeight(32)
+        self._mehr_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mehr_btn.setStyleSheet(
+            "QPushButton{background:#f0f4fa;border:1px solid #b0c4de;"
+            "border-radius:4px;color:#1565a8;font-size:11px;}"
+            "QPushButton:hover{background:#d8e8f8;}"
+        )
+        self._mehr_btn.setVisible(False)
+        self._mehr_btn.clicked.connect(self._weitere_laden)
+        layout.addWidget(self._mehr_btn)
+
         # ── Aktions-Buttons ──
         btn_row = QHBoxLayout()
         edit_btn = QPushButton("✏️ Bearbeiten")
@@ -301,6 +316,9 @@ class MitarbeiterWidget(QWidget):
         self._row_count_lbl.setStyleSheet("color: #888;")
         btn_row.addWidget(self._row_count_lbl)
         layout.addLayout(btn_row)
+
+        # ── Weitere-laden-Button (unter Tabelle) ──────────────────────────────────
+        # (wird erst nach der Tabelle in layout eingefügt, Reihenfolge beachten)
 
         # ── Info-Box ──
         info = QLabel(
@@ -349,7 +367,7 @@ class MitarbeiterWidget(QWidget):
         self._anwenden_filter()
 
     def _anwenden_filter(self):
-        """Filtert nach Funktion und wendet Suchbegriff an."""
+        """Filtert alle Daten, zeigt erste PAGE_SIZE Zeilen."""
         funktion_filter = self._filter_funktion.currentText()
         suchtext = self._search.text().strip().lower()
 
@@ -365,19 +383,31 @@ class MitarbeiterWidget(QWidget):
                 or suchtext in (m.position or "").lower()
                 or suchtext in (m.funktion or "").lower()
             ]
-        self._render_table(gefiltert)
+        self._gefiltert = gefiltert
+        self._angezeigt = 0
+        self._table.setRowCount(0)
+        self._render_page()
 
-    def _search_changed(self, _text: str):
-        self._anwenden_filter()
+    def _weitere_laden(self):
+        """Lädt die nächsten PAGE_SIZE Zeilen nach."""
+        self._render_page()
 
-    # ── Tabelle rendern ────────────────────────────────────────────────────────
+    def _render_page(self):
+        """Fügt die nächsten PAGE_SIZE Einträge aus _gefiltert in die Tabelle."""
+        start = self._angezeigt
+        ende  = min(start + self._PAGE_SIZE, len(self._gefiltert))
+        neue_zeilen = self._gefiltert[start:ende]
+        if not neue_zeilen:
+            self._mehr_btn.setVisible(False)
+            self._update_count_label()
+            return
 
-    def _render_table(self, mitarbeiter: list[Mitarbeiter]):
         ausgeschlossen_set = self._ausgeschlossen_set
-
         self._table.setUpdatesEnabled(False)
-        self._table.setRowCount(len(mitarbeiter))
-        for row, m in enumerate(mitarbeiter):
+        self._table.setRowCount(ende)  # Gesamtzeilen auf neue Tabellengröße setzen
+
+        for row_idx, m in enumerate(neue_zeilen):
+            row = start + row_idx
             vollname_low = f"{m.vorname} {m.nachname}".lower().strip()
             ist_ausgeschlossen = vollname_low in ausgeschlossen_set
             export_symbol = "🚫 Nein" if ist_ausgeschlossen else "✅ Ja"
@@ -399,7 +429,6 @@ class MitarbeiterWidget(QWidget):
                 item = QTableWidgetItem(val)
                 item.setData(Qt.ItemDataRole.UserRole, m.id)
 
-                # Funktion-Farbe
                 if m.funktion == "dispo":
                     item.setBackground(QColor("#dce8f5"))
                     item.setForeground(QColor("#0a5ba4"))
@@ -408,7 +437,6 @@ class MitarbeiterWidget(QWidget):
                 elif col == 6 and val == "inaktiv":
                     item.setForeground(QColor(Qt.GlobalColor.darkRed))
 
-                # Ausgeschlossene überschreiben alle Farben
                 if ist_ausgeschlossen:
                     item.setBackground(QColor("#fce8e8"))
                     item.setForeground(QColor("#bb0000"))
@@ -416,12 +444,36 @@ class MitarbeiterWidget(QWidget):
                 self._table.setItem(row, col, item)
 
         self._table.setUpdatesEnabled(True)
+        self._angezeigt = ende
+        self._update_count_label()
 
+    def _update_count_label(self):
+        gesamt   = len(self._gefiltert)
+        angezeigt = self._angezeigt
+        rest = gesamt - angezeigt
+        if rest > 0:
+            self._mehr_btn.setText(f"▼  Nächste {min(rest, self._PAGE_SIZE)} laden ({rest} weitere)")
+            self._mehr_btn.setVisible(True)
+        else:
+            self._mehr_btn.setVisible(False)
         self._row_count_lbl.setText(
-            f"{len(mitarbeiter)} Einträge  "
-            f"| Stamm: {sum(1 for m in mitarbeiter if m.funktion=='stamm')}  "
-            f"| Dispo: {sum(1 for m in mitarbeiter if m.funktion=='dispo')}"
+            f"{angezeigt} / {gesamt} Einträge  "
+            f"| Stamm: {sum(1 for m in self._gefiltert if m.funktion=='stamm')}  "
+            f"| Dispo: {sum(1 for m in self._gefiltert if m.funktion=='dispo')}"
         )
+
+    def _search_changed(self, _text: str):
+        self._anwenden_filter()
+
+    # ── Tabelle rendern ────────────────────────────────────────────────────────
+
+    # Wird von _render_page() ersetzt (bleibt für direkte Aufrufe bei CRUD-Refresh)
+    def _render_table(self, mitarbeiter: list[Mitarbeiter]):
+        """Erzwingt vollständiges Neurender (z.B. nach CRUD-Aktion)."""
+        self._gefiltert = mitarbeiter
+        self._angezeigt = 0
+        self._table.setRowCount(0)
+        self._render_page()
 
     # ── Hilfsmethoden ──────────────────────────────────────────────────────────
 
