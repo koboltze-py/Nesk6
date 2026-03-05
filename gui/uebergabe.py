@@ -27,6 +27,7 @@ from functions.uebergabe_functions import (
     schliesse_protokoll_ab,
     speichere_fahrzeug_notizen, lade_fahrzeug_notizen,
     speichere_handy_eintraege, lade_handy_eintraege,
+    speichere_verspaetungen, lade_verspaetungen,
 )
 from functions.fahrzeug_functions import (
     lade_alle_fahrzeuge,
@@ -146,6 +147,7 @@ class UebergabeWidget(QWidget):
         self._nav_monat = _today.month
         self._fahrzeug_notiz_widgets: dict = {}
         self._handy_eintraege_widgets: list = []  # list of (nr_edit, notiz_edit)
+        self._verspaetungen_widgets: list = []   # list of (name_edit, soll_edit, ist_edit)
         self._build_ui()
         self.refresh()
 
@@ -453,6 +455,28 @@ class UebergabeWidget(QWidget):
         self._btn_add_handy.clicked.connect(self._add_handy_row)
         layout.addWidget(self._btn_add_handy)
 
+        # Verspätete Mitarbeiter
+        layout.addWidget(self._section_label("🕐 Verspätete Mitarbeiter"))
+        self._verspaetungen_section = QFrame()
+        self._verspaetungen_section.setStyleSheet("QFrame { border: none; }")
+        self._verspaetungen_section_layout = QVBoxLayout(self._verspaetungen_section)
+        self._verspaetungen_section_layout.setContentsMargins(0, 0, 0, 0)
+        self._verspaetungen_section_layout.setSpacing(4)
+        _vsp_hint = QLabel("✅ Keine Verspätungen eingetragen – ➕ hinzufügen")
+        _vsp_hint.setStyleSheet("color: #aaa; font-size: 10px; border: none;")
+        self._verspaetungen_section_layout.addWidget(_vsp_hint)
+        layout.addWidget(self._verspaetungen_section)
+        self._btn_add_verspaetung = QPushButton("➕ Verspätung hinzufügen")
+        self._btn_add_verspaetung.setFixedHeight(28)
+        self._btn_add_verspaetung.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_add_verspaetung.setStyleSheet(
+            "QPushButton{background:#fff0e0;border:1px solid #f0c080;"
+            "border-radius:4px;padding:2px 10px;color:#b06000;font-size:11px;}"
+            "QPushButton:hover{background:#ffe0b0;}"
+        )
+        self._btn_add_verspaetung.clicked.connect(self._add_verspaetung_row)
+        layout.addWidget(self._btn_add_verspaetung)
+
         # Übergabe-Notiz
         layout.addWidget(self._section_label("📝 Übergabe-Notiz (für die Folgeschicht)"))
         self._f_notiz = QTextEdit()
@@ -706,6 +730,7 @@ class UebergabeWidget(QWidget):
         self._f_notiz.setPlainText(p.get("uebergabe_notiz", ""))
         self._rebuild_fahrzeug_section(protokoll_id)
         self._rebuild_handy_section(protokoll_id)
+        self._rebuild_verspaetungen_section(protokoll_id)
 
         abges = (status == "abgeschlossen")
         self._btn_speichern.setEnabled(not abges)
@@ -715,13 +740,18 @@ class UebergabeWidget(QWidget):
 
         for w in [self._f_datum, self._f_beginn, self._f_ende,
                   self._f_patienten, self._f_ersteller, self._f_abzeichner,
-                  self._f_ereignisse, self._f_notiz, self._btn_add_handy]:
+                  self._f_ereignisse, self._f_notiz, self._btn_add_handy,
+                  self._btn_add_verspaetung]:
             w.setEnabled(not abges)
         for w in self._fahrzeug_notiz_widgets.values():
             w.setEnabled(not abges)
         for nr, notiz in self._handy_eintraege_widgets:
             nr.setEnabled(not abges)
             notiz.setEnabled(not abges)
+        for n, s, i in self._verspaetungen_widgets:
+            n.setEnabled(not abges)
+            s.setEnabled(not abges)
+            i.setEnabled(not abges)
 
     def _neues_protokoll(self, typ: str):
         """Öffnet ein leeres Formular für ein neues Protokoll."""
@@ -752,10 +782,12 @@ class UebergabeWidget(QWidget):
         self._f_notiz.clear()
         self._rebuild_fahrzeug_section(None)
         self._rebuild_handy_section(None)
+        self._rebuild_verspaetungen_section(None)
 
         for w in [self._f_datum, self._f_beginn, self._f_ende,
                   self._f_patienten, self._f_ersteller, self._f_abzeichner,
-                  self._f_ereignisse, self._f_notiz, self._btn_add_handy]:
+                  self._f_ereignisse, self._f_notiz, self._btn_add_handy,
+                  self._btn_add_verspaetung]:
             w.setEnabled(True)
         for w in self._fahrzeug_notiz_widgets.values():
             w.setEnabled(True)
@@ -824,6 +856,12 @@ class UebergabeWidget(QWidget):
                 if nr.text().strip()
             ]
             speichere_handy_eintraege(self._aktives_protokoll_id, eintraege_handy)
+            eintraege_vsp = [
+                (n.text().strip(), s.text().strip(), i.text().strip())
+                for n, s, i in self._verspaetungen_widgets
+                if n.text().strip()
+            ]
+            speichere_verspaetungen(self._aktives_protokoll_id, eintraege_vsp)
 
     def _abschliessen(self):
         if self._aktives_protokoll_id is None:
@@ -872,6 +910,103 @@ class UebergabeWidget(QWidget):
         self._btn_abschliessen.setEnabled(False)
         self._btn_loeschen.setEnabled(False)
         self._lade_liste()
+
+    # ── Verspätungen-Sektion dynamisch aufbauen ──────────────────────────────────
+
+    def _rebuild_verspaetungen_section(self, protokoll_id):
+        """Baut die Verspätungs-Liste im Formular neu auf."""
+        while self._verspaetungen_section_layout.count():
+            item = self._verspaetungen_section_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._verspaetungen_widgets.clear()
+
+        eintraege = lade_verspaetungen(protokoll_id) if protokoll_id else []
+        if eintraege:
+            for e in eintraege:
+                name = e["mitarbeiter"] if isinstance(e, dict) else e[0]
+                soll = e["soll_zeit"]   if isinstance(e, dict) else e[1]
+                ist  = e["ist_zeit"]    if isinstance(e, dict) else e[2]
+                self._add_verspaetung_row(name=name, soll_zeit=soll, ist_zeit=ist,
+                                          _skip_hint_remove=True)
+        else:
+            hint = QLabel("✅ Keine Verspätungen eingetragen – ➕ hinzufügen")
+            hint.setStyleSheet("color: #aaa; font-size: 10px; border: none;")
+            self._verspaetungen_section_layout.addWidget(hint)
+
+    def _add_verspaetung_row(self, name: str = "", soll_zeit: str = "", ist_zeit: str = "",
+                              _skip_hint_remove: bool = False):
+        """Fügt eine neue Verspätungs-Zeile (Name, Soll-Zeit, Ist-Zeit) hinzu."""
+        if not _skip_hint_remove and self._verspaetungen_section_layout.count() > 0:
+            first = self._verspaetungen_section_layout.itemAt(0)
+            if first and first.widget() and isinstance(first.widget(), QLabel):
+                w = self._verspaetungen_section_layout.takeAt(0).widget()
+                w.deleteLater()
+
+        row_frame = QFrame()
+        row_frame.setStyleSheet(
+            "QFrame{background:#fff8f0;border:1px solid #f0c080;border-radius:4px;}"
+        )
+        row_layout = QHBoxLayout(row_frame)
+        row_layout.setContentsMargins(6, 4, 6, 4)
+        row_layout.setSpacing(6)
+
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText("Name Mitarbeiter")
+        name_edit.setText(str(name))
+        name_edit.setStyleSheet(
+            "border:1px solid #ccc;border-radius:3px;padding:2px 6px;"
+            "font-size:11px;background:white;"
+        )
+        soll_lbl = QLabel("Soll:")
+        soll_lbl.setStyleSheet("border:none;color:#555;font-size:10px;")
+        soll_edit = QLineEdit()
+        soll_edit.setPlaceholderText("07:00")
+        soll_edit.setText(str(soll_zeit))
+        soll_edit.setFixedWidth(58)
+        soll_edit.setStyleSheet(
+            "border:1px solid #ccc;border-radius:3px;padding:2px 4px;"
+            "font-size:11px;background:white;"
+        )
+        ist_lbl = QLabel("Ist:")
+        ist_lbl.setStyleSheet("border:none;color:#c0392b;font-size:10px;")
+        ist_edit = QLineEdit()
+        ist_edit.setPlaceholderText("07:45")
+        ist_edit.setText(str(ist_zeit))
+        ist_edit.setFixedWidth(58)
+        ist_edit.setStyleSheet(
+            "border:1px solid #f0a080;border-radius:3px;padding:2px 4px;"
+            "font-size:11px;background:white;"
+        )
+        del_btn = QPushButton("✕")
+        del_btn.setFixedSize(22, 22)
+        del_btn.setStyleSheet(
+            "QPushButton{background:#eee;border:none;border-radius:3px;"
+            "color:#a00;font-weight:bold;font-size:11px;}"
+            "QPushButton:hover{background:#ffcccc;}"
+        )
+        row_layout.addWidget(name_edit, 1)
+        row_layout.addWidget(soll_lbl)
+        row_layout.addWidget(soll_edit)
+        row_layout.addWidget(ist_lbl)
+        row_layout.addWidget(ist_edit)
+        row_layout.addWidget(del_btn)
+
+        entry = (name_edit, soll_edit, ist_edit)
+        self._verspaetungen_widgets.append(entry)
+
+        def _remove():
+            if entry in self._verspaetungen_widgets:
+                self._verspaetungen_widgets.remove(entry)
+            row_frame.setParent(None)
+            row_frame.deleteLater()
+            if self._verspaetungen_section_layout.count() == 0:
+                hint = QLabel("✅ Keine Verspätungen eingetragen – ➕ hinzufügen")
+                hint.setStyleSheet("color: #aaa; font-size: 10px; border: none;")
+                self._verspaetungen_section_layout.addWidget(hint)
+
+        del_btn.clicked.connect(_remove)
+        self._verspaetungen_section_layout.addWidget(row_frame)
 
     # ── Fahrzeug-Sektion dynamisch aufbauen ────────────────────────────────────
 
@@ -1168,6 +1303,112 @@ class UebergabeWidget(QWidget):
         schaden_vl.addWidget(sch_scroll)
         dlg_layout.addWidget(schaden_frame)
 
+        # ── Verspätete Mitarbeiter – Zeitraumfilter ───────────────────────────
+        try:
+            alle_vsp = lade_verspaetungen(pid) if pid else []
+        except Exception:
+            alle_vsp = []
+
+        def _vsp_label(e):
+            _name = e["mitarbeiter"] if isinstance(e, dict) else e[0]
+            _soll = e["soll_zeit"]   if isinstance(e, dict) else e[1]
+            _ist  = e["ist_zeit"]    if isinstance(e, dict) else e[2]
+            _diff = ""
+            try:
+                from datetime import datetime as _dt
+                _delta = int((_dt.strptime(_ist, "%H:%M") - _dt.strptime(_soll, "%H:%M")).total_seconds() // 60)
+                if _delta > 0:
+                    _diff = f"  (+{_delta} Min.)"
+            except Exception:
+                pass
+            return _name, _soll, _ist, _diff
+
+        vsp_frame = QFrame()
+        vsp_frame.setStyleSheet(
+            "QFrame{border:1px solid #f0c080;border-radius:5px;background:#fff8f0;}"
+        )
+        vsp_vl = QVBoxLayout(vsp_frame)
+        vsp_vl.setContentsMargins(10, 8, 10, 8)
+        vsp_vl.setSpacing(6)
+
+        vsp_hdr_row = QHBoxLayout()
+        vsp_hdr_lbl = QLabel("🕐 Verspätete Mitarbeiter – Zeitraum filtern")
+        vsp_hdr_lbl.setStyleSheet("font-weight:bold;font-size:11px;border:none;")
+        _von_lbl = QLabel("Von:")
+        _von_lbl.setStyleSheet("border:none;font-size:11px;")
+        vsp_von_edit = QLineEdit()
+        vsp_von_edit.setPlaceholderText("00:00")
+        vsp_von_edit.setText(beginn if beginn else "00:00")
+        vsp_von_edit.setFixedWidth(58)
+        _bis_lbl = QLabel("Bis:")
+        _bis_lbl.setStyleSheet("border:none;font-size:11px;")
+        vsp_bis_edit = QLineEdit()
+        vsp_bis_edit.setPlaceholderText("23:59")
+        vsp_bis_edit.setText(ende if ende else "23:59")
+        vsp_bis_edit.setFixedWidth(58)
+        vsp_hdr_row.addWidget(vsp_hdr_lbl)
+        vsp_hdr_row.addStretch()
+        vsp_hdr_row.addWidget(_von_lbl)
+        vsp_hdr_row.addWidget(vsp_von_edit)
+        vsp_hdr_row.addWidget(_bis_lbl)
+        vsp_hdr_row.addWidget(vsp_bis_edit)
+        vsp_vl.addLayout(vsp_hdr_row)
+
+        vsp_scroll = _QSA()
+        vsp_scroll.setWidgetResizable(True)
+        vsp_scroll.setMaximumHeight(120)
+        vsp_scroll.setStyleSheet("QScrollArea{border:none;}")
+        vsp_inner = QWidget()
+        vsp_inner.setStyleSheet("background:transparent;")
+        vsp_inner_vl = QVBoxLayout(vsp_inner)
+        vsp_inner_vl.setContentsMargins(0, 0, 0, 0)
+        vsp_inner_vl.setSpacing(2)
+        vsp_scroll.setWidget(vsp_inner)
+        vsp_vl.addWidget(vsp_scroll)
+
+        _vsp_checkboxes: list = []  # list of (QCheckBox, entry)
+
+        def _rebuild_vsp_liste():
+            while vsp_inner_vl.count():
+                _it = vsp_inner_vl.takeAt(0)
+                if _it.widget():
+                    _it.widget().deleteLater()
+            _vsp_checkboxes.clear()
+            if not alle_vsp:
+                _nl = QLabel("Keine Verspätungen im Protokoll erfasst.")
+                _nl.setStyleSheet("color:#aaa;font-size:10px;border:none;padding:4px;")
+                vsp_inner_vl.addWidget(_nl)
+                return
+            from datetime import datetime as _dt2
+            def _pt(s):
+                try: return _dt2.strptime(s.strip(), "%H:%M")
+                except: return None
+            t_von = _pt(vsp_von_edit.text())
+            t_bis = _pt(vsp_bis_edit.text())
+            shown = 0
+            for _e in alle_vsp:
+                _n, _s, _i, _d = _vsp_label(_e)
+                t_ist_v = _pt(_i)
+                if t_von and t_bis and t_ist_v:
+                    if not (t_von <= t_ist_v <= t_bis):
+                        continue
+                from PySide6.QtWidgets import QCheckBox as _QCB
+                _cb = _QCB(f"🕐 {_n}  –  Gefordert: {_s}  Tatsächlich: {_i}{_d}")
+                _cb.setChecked(True)
+                _cb.setStyleSheet("font-size:10px;")
+                vsp_inner_vl.addWidget(_cb)
+                _vsp_checkboxes.append((_cb, _e))
+                shown += 1
+            if shown == 0:
+                _nl2 = QLabel(f"Keine Verspätungen im Zeitraum {vsp_von_edit.text()}–{vsp_bis_edit.text()}.")
+                _nl2.setStyleSheet("color:#aaa;font-size:10px;border:none;padding:4px;")
+                vsp_inner_vl.addWidget(_nl2)
+
+        vsp_von_edit.textChanged.connect(lambda _: _rebuild_vsp_liste())
+        vsp_bis_edit.textChanged.connect(lambda _: _rebuild_vsp_liste())
+        _rebuild_vsp_liste()
+        dlg_layout.addWidget(vsp_frame)
+
         # E-Mail-Body
         body_lbl = QLabel("Nachricht:")
         body_lbl.setStyleSheet("font-weight:bold;")
@@ -1338,6 +1579,15 @@ class UebergabeWidget(QWidget):
                     )
                 except Exception:
                     pass
+
+            # Verspätete Mitarbeiter in Body einbauen
+            _checked_vsp = [(_cb, _e) for _cb, _e in _vsp_checkboxes if _cb.isChecked()]
+            if _checked_vsp:
+                _vsp_lines = ["", "─" * 38, "🕐 Verspätete Mitarbeiter:", "─" * 38]
+                for _, _e in _checked_vsp:
+                    _n, _s, _i, _d = _vsp_label(_e)
+                    _vsp_lines.append(f"  • {_n}  –  Gefordert: {_s}  Tatsächlich: {_i}{_d}")
+                body_text += "\n" + "\n".join(_vsp_lines)
 
             to_val = an_edit.text().strip()
             cc_val = cc_edit.text().strip()

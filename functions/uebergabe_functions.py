@@ -240,6 +240,35 @@ def lade_handy_eintraege(protokoll_id: int) -> list:
         return cur.fetchall() or []
 
 
+# ── Verspätete Mitarbeiter ────────────────────────────────────────────────────
+
+def speichere_verspaetungen(protokoll_id: int, eintraege: list) -> None:
+    """Speichert Verspätungseinträge (löscht alte, fügt neue ein)."""
+    with db_cursor(commit=True) as cur:
+        cur.execute(
+            "DELETE FROM uebergabe_verspaetungen WHERE protokoll_id = ?",
+            (protokoll_id,)
+        )
+        for name, soll, ist in eintraege:
+            if name:
+                cur.execute(
+                    "INSERT INTO uebergabe_verspaetungen "
+                    "(protokoll_id, mitarbeiter, soll_zeit, ist_zeit) VALUES (?, ?, ?, ?)",
+                    (protokoll_id, name, soll, ist)
+                )
+
+
+def lade_verspaetungen(protokoll_id: int) -> list:
+    """Gibt Verspätungseinträge für ein Protokoll zurück."""
+    with db_cursor() as cur:
+        cur.execute(
+            "SELECT mitarbeiter, soll_zeit, ist_zeit "
+            "FROM uebergabe_verspaetungen WHERE protokoll_id = ? ORDER BY id",
+            (protokoll_id,)
+        )
+        return cur.fetchall() or []
+
+
 # ── Bulk-Aktionen (Verwaltung) ────────────────────────────────────────────────────
 
 def lade_alle_protokolle_verwaltung(schicht_typ: str | None = None) -> list:

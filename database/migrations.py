@@ -154,6 +154,14 @@ CREATE TABLE IF NOT EXISTS uebergabe_handy_eintraege (
     geraet_nr       TEXT NOT NULL,
     notiz           TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS uebergabe_verspaetungen (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    protokoll_id    INTEGER NOT NULL REFERENCES uebergabe_protokolle(id) ON DELETE CASCADE,
+    mitarbeiter     TEXT NOT NULL,
+    soll_zeit       TEXT DEFAULT '',
+    ist_zeit        TEXT DEFAULT ''
+);
 """
 
 _default_ordner = (
@@ -222,6 +230,20 @@ def run_migrations():
         # gesendet-Flag für Fahrzeugschäden (E-Mail-Tracking)
         try:
             cur.execute("ALTER TABLE fahrzeug_schaeden ADD COLUMN gesendet INTEGER DEFAULT 0")
+        except Exception:
+            pass
+
+        # Verspätungen-Tabelle nachrüsten (für ältere DBs)
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS uebergabe_verspaetungen (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    protokoll_id INTEGER NOT NULL REFERENCES uebergabe_protokolle(id) ON DELETE CASCADE,
+                    mitarbeiter  TEXT NOT NULL,
+                    soll_zeit    TEXT DEFAULT '',
+                    ist_zeit     TEXT DEFAULT ''
+                )
+            """)
         except Exception:
             pass
 
