@@ -50,7 +50,10 @@ _ART_LABEL = {
 def _ensured_db() -> str:
     """Stellt sicher, dass der DB-Ordner existiert und das Schema angelegt ist."""
     os.makedirs(DB_ORDNER, exist_ok=True)
-    con = sqlite3.connect(DB_PFAD)
+    con = sqlite3.connect(DB_PFAD, timeout=5)
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA synchronous  = NORMAL")
+    con.execute("PRAGMA busy_timeout  = 5000")
     con.execute(_CREATE_SQL)
     con.commit()
     con.close()
@@ -61,7 +64,10 @@ def _ensured_db() -> str:
 def _db():
     """Context-Manager: liefert eine Row-Factory-Connection."""
     _ensured_db()
-    con = sqlite3.connect(DB_PFAD)
+    con = sqlite3.connect(DB_PFAD, timeout=5)
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA synchronous  = NORMAL")
+    con.execute("PRAGMA busy_timeout  = 5000")
     con.row_factory = sqlite3.Row
     try:
         yield con

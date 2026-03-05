@@ -450,10 +450,10 @@ Alle SQLite-Datenbanken liegen seit **05.03.2026** zentral im Ordner `database S
 | Datei | Beschreibung | WAL | Zugriff über |
 |---|---|---|---|
 | `nesk3.db` | Hauptdatenbank (Dienstplan, Mitarbeiter, Fahrzeuge, Übergabe, …) | ✅ | `database/connection.py` |
-| `archiv.db` | Archivierte Übergabe-Protokolle | ❌ | `config.py → ARCHIV_DB_PATH` |
-| `stellungnahmen.db` | Passagierbeschwerde-Stellungnahmen | ❌ | `functions/stellungnahmen_db.py` |
-| `einsaetze.db` | Einsatzprotokoll FKB (Dienstliches) | ❌ | `gui/dienstliches.py` |
-| `verspaetungen.db` | Verspätungs-Meldungen (Unpünktlicher Dienstantritt) | ❌ | `functions/verspaetung_db.py` |
+| `archiv.db` | Archivierte Übergabe-Protokolle | ✅ | `functions/archiv_functions.py` |
+| `stellungnahmen.db` | Passagierbeschwerde-Stellungnahmen | ✅ | `functions/stellungnahmen_db.py` |
+| `einsaetze.db` | Einsatzprotokoll FKB (Dienstliches) | ✅ | `gui/dienstliches.py` |
+| `verspaetungen.db` | Verspätungs-Meldungen (Unpünktlicher Dienstantritt) | ✅ | `functions/verspaetung_db.py` |
 
 **Hinweis zu OneDrive/Netzwerkbetrieb:** SQLite ist nicht für echten Mehrbenutzer-Schreibzugriff über Netzlaufwerke geeignet. WAL-Modus (`nesk3.db`) verbessert die Lese-Parallelität, schützt aber nicht vor Schreibkonflikten bei gleichzeitigem Zugriff von mehreren PCs. Für Nur-Lese-Zugriffe (Anzeige) ist OneDrive-Sync ausreichend.
 

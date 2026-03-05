@@ -53,7 +53,10 @@ CREATE TABLE IF NOT EXISTS einsaetze (
 
 def _ensured_db() -> str:
     os.makedirs(_EINSATZ_DB_DIR, exist_ok=True)
-    con = sqlite3.connect(_EINSATZ_DB_PFAD)
+    con = sqlite3.connect(_EINSATZ_DB_PFAD, timeout=5)
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA synchronous  = NORMAL")
+    con.execute("PRAGMA busy_timeout  = 5000")
     con.execute(_CREATE_SQL)
     con.commit()
     con.close()
@@ -63,7 +66,10 @@ def _ensured_db() -> str:
 @contextmanager
 def _db():
     _ensured_db()
-    con = sqlite3.connect(_EINSATZ_DB_PFAD)
+    con = sqlite3.connect(_EINSATZ_DB_PFAD, timeout=5)
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA synchronous  = NORMAL")
+    con.execute("PRAGMA busy_timeout  = 5000")
     con.row_factory = sqlite3.Row
     try:
         yield con

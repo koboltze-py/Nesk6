@@ -5,6 +5,27 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
+## 05.03.2026 – v3.1.1
+
+### WAL-Modus für alle Datenbanken
+
+Alle 5 SQLite-Datenbanken heizen jetzt `WAL` + `synchronous=NORMAL` + `busy_timeout=5000ms`.
+
+| DB | Datei | WAL vorher | WAL jetzt |
+|---|---|---|---|
+| `nesk3.db` | `database/connection.py` | ✅ | ✅ |
+| `archiv.db` | `functions/archiv_functions.py` | ✅ | ✅ |
+| `stellungnahmen.db` | `functions/stellungnahmen_db.py` | ❌ | ✅ |
+| `einsaetze.db` | `gui/dienstliches.py` | ❌ | ✅ |
+| `verspaetungen.db` | `functions/verspaetung_db.py` | ❌ | ✅ |
+
+- **`functions/stellungnahmen_db.py`**: `_ensured_db()` + `_db()` – WAL-Pragmas ergänzt
+- **`gui/dienstliches.py`**: `_ensured_db()` + `_db()` – WAL-Pragmas ergänzt
+- **`functions/verspaetung_db.py`**: neue `_connect()`-Hilfsfunktion mit WAL; alle `sqlite3.connect`-Aufrufe ersetzt
+- Backup vor Änderung: `Backup Data/db_backups/pre_wal_<ts>/`
+
+---
+
 ## 05.03.2026 – v3.1.0
 
 ### Datenbank-Konsolidierung: alle DBs in `database SQL/`

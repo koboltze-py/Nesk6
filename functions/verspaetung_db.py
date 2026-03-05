@@ -10,9 +10,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 _DB_PFAD = BASE_DIR / "database SQL" / "verspaetungen.db"
 
 
+def _connect() -> sqlite3.Connection:
+    """Gibt eine Verbindung mit WAL-Modus und busy_timeout zurück."""
+    conn = sqlite3.connect(_DB_PFAD, timeout=5)
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous  = NORMAL")
+    conn.execute("PRAGMA busy_timeout  = 5000")
+    return conn
+
+
 def _init_db():
     _DB_PFAD.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(_DB_PFAD) as conn:
+    with _connect() as conn:
         conn.execute("""
         CREATE TABLE IF NOT EXISTS verspaetungen (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +44,7 @@ def verspaetung_speichern(daten: dict) -> int:
     """Neuen Eintrag speichern, gibt die neue ID zurück."""
     _init_db()
     now = datetime.now().isoformat(timespec="seconds")
-    with sqlite3.connect(_DB_PFAD) as conn:
+    with _connect() as conn:
         cur = conn.execute(
             """
             INSERT INTO verspaetungen
@@ -63,7 +72,7 @@ def verspaetung_speichern(daten: dict) -> int:
 def verspaetung_aktualisieren(entry_id: int, daten: dict):
     """Bestehenden Eintrag aktualisieren."""
     _init_db()
-    with sqlite3.connect(_DB_PFAD) as conn:
+    with _connect() as conn:
         conn.execute(
             """
             UPDATE verspaetungen
@@ -90,7 +99,7 @@ def verspaetung_aktualisieren(entry_id: int, daten: dict):
 def verspaetung_loeschen(entry_id: int):
     """Eintrag aus der Datenbank löschen."""
     _init_db()
-    with sqlite3.connect(_DB_PFAD) as conn:
+    with _connect() as conn:
         conn.execute("DELETE FROM verspaetungen WHERE id=?", (entry_id,))
         conn.commit()
 
@@ -102,7 +111,7 @@ def lade_verspaetungen(
 ) -> list[dict]:
     """Einträge laden; optionale Filterung nach Monat/Jahr/Suchtext."""
     _init_db()
-    with sqlite3.connect(_DB_PFAD) as conn:
+    with _connect() as conn:
         conn.row_factory = sqlite3.Row
         q = "SELECT * FROM verspaetungen WHERE 1=1"
         params: list = []
@@ -123,7 +132,7 @@ def lade_verspaetungen(
 def verfuegbare_jahre() -> list[int]:
     """Liste aller Jahre mit Einträgen zurückgeben."""
     _init_db()
-    with sqlite3.connect(_DB_PFAD) as conn:
+    with _connect() as conn:
         rows = conn.execute(
             "SELECT DISTINCT CAST(substr(datum, 7, 4) AS INTEGER) AS j "
             "FROM verspaetungen WHERE length(datum) = 10 ORDER BY j DESC"
