@@ -138,6 +138,7 @@ def lade_verspaetungen_fuer_datum(datum_yyyymmdd: str) -> list[dict]:
     except Exception:
         return []
     with _connect() as conn:
+        conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT * FROM verspaetungen WHERE datum = ? ORDER BY erstellt_am DESC",
             (datum_filter,)

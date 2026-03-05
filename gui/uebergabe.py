@@ -1797,3 +1797,9 @@ class UebergabeWidget(QWidget):
 
     def refresh(self):
         self._lade_liste()
+        # Verspätungssektion neu aufbauen, damit neue MA-Doku-Einträge
+        # sichtbar werden wenn man von einem anderen Tab zurückkommt
+        if self._aktives_protokoll_id is not None:
+            self._rebuild_verspaetungen_section(self._aktives_protokoll_id)
+        elif self._ist_neu:
+            self._rebuild_verspaetungen_section(None)
