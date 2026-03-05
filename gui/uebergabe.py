@@ -1453,13 +1453,19 @@ class UebergabeWidget(QWidget):
                 except: return None
             t_von = _pt(vsp_von_edit.text())
             t_bis = _pt(vsp_bis_edit.text())
+            _overnight = (t_von and t_bis and t_von > t_bis)
             shown = 0
             for _e in alle_vsp:
                 _n, _s, _i, _d = _vsp_label(_e)
                 t_ist_v = _pt(_i)
                 if t_von and t_bis and t_ist_v:
-                    if not (t_von <= t_ist_v <= t_bis):
-                        continue
+                    if _overnight:
+                        # Nachtdienst über Mitternacht: z.B. 19:00–07:00
+                        if not (t_ist_v >= t_von or t_ist_v <= t_bis):
+                            continue
+                    else:
+                        if not (t_von <= t_ist_v <= t_bis):
+                            continue
                 from PySide6.QtWidgets import QCheckBox as _QCB
                 _src_tag = "  📋" if (isinstance(_e, dict) and "dienstbeginn" in _e) else ""
                 _cb = _QCB(f"🕐 {_n}  –  Gefordert: {_s}  Tatsächlich: {_i}{_d}{_src_tag}")
