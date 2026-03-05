@@ -27,6 +27,7 @@ from gui.fahrzeuge        import FahrzeugeWidget
 from gui.einstellungen    import EinstellungenWidget
 from gui.code19           import Code19Widget
 from gui.dokument_browser       import DokumentBrowserWidget
+from gui.mitarbeiter            import MitarbeiterWidget
 from gui.mitarbeiter_dokumente  import MitarbeiterDokumenteWidget
 from gui.hilfe_dialog           import HilfeDialog
 from gui.dienstliches           import DienstlichesWidget
@@ -46,11 +47,12 @@ NAV_ITEMS = [
     ("🤒", "Krankmeldungen",  10),
     ("💾", "Backup",          11),
     ("⚙️",  "Einstellungen",  12),
+    ("📄", "MA-Dokumente",    13),
 ]
 
 NAV_TOOLTIPS = [
     "Startseite – Statistiken und Übersicht",
-    "Mitarbeiter-Dokumente: Stellungnahmen, Bescheinigungen und Word-Dokumente mit DRK-Vorlage erstellen",
+    "Mitarbeiter-Übersicht: Stamm/Dispo anzeigen, bearbeiten und aus Dienstplänen importieren",
     "Dienstliche Protokolle: Einsätze und Berichte",
     "Tagdienst-Aufgaben, Checklisten und Code-19-Mail",
     "Nachtdienst-Aufgaben und Code-19-Mail",
@@ -62,6 +64,7 @@ NAV_TOOLTIPS = [
     "Krankmeldungsformulare öffnen (Ordner: 03_Krankmeldungen)",
     "Datensicherung erstellen und wiederherstellen",
     "App-Einstellungen, Pfade und E-Mobby-Fahrerliste",
+    "Mitarbeiter-Dokumente: Stellungnahmen, Bescheinigungen und Word-Dokumente mit DRK-Vorlage erstellen",
 ]
 
 
@@ -219,6 +222,7 @@ class MainWindow(QMainWindow):
 
         # Pages
         self._dashboard_page         = DashboardWidget()
+        self._mitarbeiter_page       = MitarbeiterWidget()
         self._mitarbeiter_dok_page   = MitarbeiterDokumenteWidget()
         self._dienstliches_page      = DienstlichesWidget()
         self._aufgaben_tag_page      = AufgabenTagWidget()
@@ -242,13 +246,14 @@ class MainWindow(QMainWindow):
         self._backup_page        = self._placeholder_page("💾 Backup", "Backup-Verwaltung wird implementiert.")
         self._settings_page      = EinstellungenWidget()
 
-        for page in [self._dashboard_page, self._mitarbeiter_dok_page,
+        for page in [self._dashboard_page, self._mitarbeiter_page,
                      self._dienstliches_page,
                      self._aufgaben_tag_page, self._aufgaben_page,
                      self._dienstplan_page, self._uebergabe_page,
                      self._fahrzeuge_page, self._code19_page,
                      self._ausdrucke_page, self._krankmeldungen_page,
-                     self._backup_page, self._settings_page]:
+                     self._backup_page, self._settings_page,
+                     self._mitarbeiter_dok_page]:
             self._stack.addWidget(page)
 
         layout.addWidget(self._stack)
@@ -277,7 +282,7 @@ class MainWindow(QMainWindow):
         if index == 0:
             self._dashboard_page.refresh()
         elif index == 1:
-            self._mitarbeiter_dok_page.refresh()
+            self._mitarbeiter_page.refresh()
         elif index == 2:
             self._dienstliches_page.refresh()
         elif index == 3:
@@ -296,3 +301,5 @@ class MainWindow(QMainWindow):
             self._ausdrucke_page.refresh()
         elif index == 10:
             self._krankmeldungen_page.refresh()
+        elif index == 13:
+            self._mitarbeiter_dok_page.refresh()
