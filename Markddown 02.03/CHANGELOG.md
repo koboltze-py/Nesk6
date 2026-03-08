@@ -4,6 +4,93 @@ Alle Änderungen in chronologischer Reihenfolge.
 
 ---
 
+## 05.03.2026 – v3.2.x
+
+### Performance-Fixes & Async Mitarbeiter-Laden
+
+#### `gui/main_window.py`
+- Alle Navigation-Refreshes über `QTimer.singleShot(0, fn)` → keine UI-Blockierung beim Klick
+
+#### `gui/mitarbeiter.py` – `MitarbeiterWidget`
+- `_LoadWorker(QThread)`: DB-Abfrage asynchron, kein `wait()` mehr
+- DB-Timeout auf 3 s reduziert (`database/connection.py`)
+- Pagination: nur 50 Zeilen werden initial gerendert; „▼ Nächste X laden"-Button
+  - `_PAGE_SIZE = 50`, `_render_page()` statt `_render_table()`
+  - Suche läuft auf allen Daten in `_alle`
+
+#### `gui/mitarbeiter.py` – `MitarbeiterKombiniertWidget`
+- Lazy Loading: `MitarbeiterDokumenteWidget` erst beim ersten Klick auf Tab 0 (Dokumente) laden
+- Tab-Reihenfolge: **Tab 0 = 📄 Dokumente**, Tab 1 = 👥 Übersicht
+
+---
+
+### Mitarbeiter-Datenbank & Verwaltung
+
+#### `fd9fb84` – Eigene `mitarbeiter.db`
+- Neue SQLite-DB `database SQL/mitarbeiter.db`
+- Tabelle `mitarbeiter`: id, name, kuerzel, funktion, export_flag
+
+#### `a93f284` – Import aus Dienstplänen + CRUD
+- `MitarbeiterWidget`: Laden aus Dienstplänen, vollständiges CRUD (Neu/Bearbeiten/Löschen)
+- Import-Button scannt alle gespeicherten Dienstplan-Dateien
+
+---
+
+### Refactoring: Datenbanken konsolidiert
+
+#### `dac3b9b` – Alle DBs nach `database SQL/`
+- Alle 5 SQLite-Datenbanken liegen jetzt unter `database SQL/`:
+  - `nesk3.db`, `mitarbeiter.db`, `stellungnahmen.db`, `verspaetungen.db`, `archiv.db`
+- Einheitlicher Zugriffspfad, kein verstreuter DB-Speicher mehr
+
+#### `464a8e7` – WAL-Modus für alle 5 SQLite-DBs
+- `PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;` in allen `_connect()`-Funktionen
+- Verhindert „database is locked"-Fehler bei parallelem Zugriff
+
+---
+
+### Verspätungs-Modul
+
+#### `ccb363f` – Neues Verspätungs-Protokoll
+
+##### `functions/verspaetung_db.py` (NEU)
+- SQLite-DB `database SQL/verspaetungen.db`
+- Tabelle `verspaetungen`: id, erstellt_am, mitarbeiter, datum (dd.MM.yyyy), dienst (T/T10/N/N10), dienstbeginn (HH:MM), dienstantritt (HH:MM), verspaetung_min, begruendung, aufgenommen_von, dokument_pfad
+- CRUD: `verspaetung_speichern()`, `verspaetung_aktualisieren()`, `verspaetung_loeschen()`, `lade_verspaetungen()`, `verfuegbare_jahre()`
+- **NEU 05.03:** `lade_verspaetungen_fuer_datum(yyyy-MM-dd)` mit korrektem `row_factory = sqlite3.Row`
+
+##### `gui/mitarbeiter_dokumente.py` – `_VerspaetungDialog`
+- Dialog: Mitarbeiter, Datum, Dienstart (T/T10/N/N10), Dienstbeginn/Dienstantritt, Verspätung (readonly, auto), Begründung, Aufgenommen von
+- Erstellt Verspätungsdokument per `erstelle_verspaetungs_dokument()`
+- Speichert in `verspaetungen.db`
+- Tab „⏰ Verspätungs-Protokoll": Filter (Jahr/Monat/Suche), Tabelle, Aktionen (öffnen, bearbeiten, E-Mail senden, löschen)
+- **UI-Fix:** Kategorie „Verspätung" zeigt keinen Datei-Zähler; „Neues Dokument"-Button bei Verspätung ausgeblendet
+
+---
+
+### Übergabe – Verspätungsanzeige
+
+#### `ad7b8f7` – Verspätete Mitarbeiter in Übergabe
+- Neue DB-Tabelle `uebergabe_verspaetungen` in `nesk3.db`
+- Sektion im Formular: Name, Soll-Zeit, Ist-Zeit (editierbar, ➕ Button)
+- E-Mail-Dialog: Zeitraumfilter (Von/Bis), Checkboxen je Verspätung → in Mail-Body
+
+#### `252cfe9` – Verspätungen aus MA-Doku in Übergabe
+- `_rebuild_verspaetungen_section()`: liest zusätzlich aus `verspaetungen.db` nach Protokoll-Datum
+- Schreibgeschützte Zeilen (blau, „📋 MA-Doku"-Badge)
+- `_add_verspaetung_db_row()`: Read-only-Widget für MA-Doku-Einträge
+- `_vsp_label()` erkennt beide Dict-Formate (soll_zeit/ist_zeit vs. dienstbeginn/dienstantritt)
+
+#### `77ca947` – Bugfix row_factory
+- `lade_verspaetungen_fuer_datum()`: `conn.row_factory = sqlite3.Row` hinzugefügt (fehlte → silent TypeError)
+- `refresh()` in `UebergabeWidget` baut Verspätungssektion neu auf → neue MA-Doku-Einträge sichtbar auf Tab-Wechsel
+
+#### `6f881a1` – Overnight-Zeitfilter & Folgetag-Laden
+- Zeitraumfilter erkennt Overnight-Dienste (19:00–07:00): `t_ist >= t_von OR t_ist <= t_bis`
+- E-Mail-Dialog lädt Folgetag + heutiges Datum aus `verspaetungen.db` (Verspätungen nach Mitternacht)
+
+---
+
 ## 02.03.2026 – v3.1.1
 
 ### Stellungnahmen Dateien-Tab: Art + Mitarbeiter Spalten
@@ -128,6 +215,7 @@ Alle Änderungen in chronologischer Reihenfolge.
 
 | Datei | Datum | Größe |
 |-------|-------|-------|
+| `Nesk3_backup_20260305_065843.zip` | 05.03.2026 06:58 | 142,3 MB |
 | `Nesk3_backup_20260302_170729.zip` | 02.03.2026 17:07 | ~10 MB |
 | `Nesk3_backup_20260302_151916.zip` | 02.03.2026 15:19 | ~10 MB |
 | `Nesk3_backup_20260302_150415.zip` | 02.03.2026 15:04 | ~10 MB |

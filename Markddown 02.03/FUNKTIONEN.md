@@ -1,6 +1,6 @@
-# Nesk3 – Vollständige Funktionsübersicht
+﻿# Nesk3 – Vollständige Funktionsübersicht
 
-**Stand:** 02.03.2026 – v3.1.1
+**Stand:** 05.03.2026 – v3.2.x
 
 ---
 
@@ -23,25 +23,47 @@
 | 10 | 💾 | Backup |
 | 11 | ⚙️ | Einstellungen |
 
+Alle Navigation-Refreshes über `QTimer.singleShot(0, fn)` – keine UI-Blockierung.
+
 ---
 
-## 2. Mitarbeiter-Dokumente
+## 2. Mitarbeiter
+
+### `gui/mitarbeiter.py` – `MitarbeiterKombiniertWidget`
+
+- QTabWidget mit zwei Tabs:
+  - **Tab 0 📄 Dokumente** – Lazy Loading (erst beim ersten Klick geladen)
+  - **Tab 1 👥 Übersicht** – sofort geladen
+
+### `MitarbeiterWidget` (Tab 1)
+- Paginierte Tabelle: 50 Zeilen initial, „▼ Nächste X laden"-Button
+- Async DB-Laden via `_LoadWorker(QThread)` – kein UI-Hängen
+- Suche auf allen Daten (nicht nur angezeigten)
+- CRUD: Neu anlegen, Bearbeiten, Löschen
+- Import aus Dienstplan-Dateien
+- DB: `database SQL/mitarbeiter.db`
+
+---
+
+## 3. Mitarbeiter-Dokumente
 
 ### `gui/mitarbeiter_dokumente.py` – `MitarbeiterDokumenteWidget`
 
 **Aufbau:**
 - Titelleiste (blau): „📂 Ordner öffnen" + „🔄 Refresh"
-- Linke Sidebar: Kategorieliste mit Dateianzahl-Badge + Vorlage-Status
+- Linke Sidebar: Kategorieliste mit Dateianzahl-Badge (Ausnahme: „Verspätung" ohne Zähler) + Vorlage-Status
 - Rechter Bereich: QTabWidget
   - Tab 0 „📂 Dateien": Aktions-Buttons + Dateitabelle
   - Tab 1 „🔍 Datenbank-Suche": Filter + DB-Tabelle (nur bei Kategorie Stellungnahmen)
+  - Tab 2 „⏰ Verspätungs-Protokoll": Filter + Tabelle (nur bei Kategorie Verspätung)
 
 **Aktions-Buttons:**
 
 | Button | Sichtbar | Funktion |
 |--------|----------|----------|
-| ＋ Neues Dokument | immer | `_NeuesDokumentDialog` |
+| ＋ Neues Dokument | alle außer Verspätung | `_NeuesDokumentDialog` |
 | 📝 Stellungnahme | nur Stellungnahmen | `_StellungnahmeDialog` |
+| ⏰ Verspätung erfassen | nur Verspätung | `_VerspaetungDialog` |
 | 📂 Öffnen | immer | OS-Standard |
 | ✏ Bearbeiten | immer | `_DokumentBearbeitenDialog` |
 | 🔤 Umbenennen | immer | `QInputDialog` |
@@ -55,18 +77,7 @@
 | Alle anderen | Dateiname · Zuletzt geändert · Typ |
 | Stellungnahmen | Dateiname · **Art** · **Mitarbeiter** · Zuletzt geändert · Typ |
 
-Art und Mitarbeiter werden aus der SQLite-DB per Dateiname nachgeschlagen. Kein DB-Eintrag → `—`.
-
-**Rechtsklick-Menü (Dateitabelle):**
-
-| Aktion | Funktion |
-|--------|---------|
-| 📂 Im Explorer anzeigen | Explorer mit Dateiauswahl |
-| 📄 Öffnen | OS-Standard öffnen |
-| *(Separator)* | |
-| ✏ Bearbeiten | `_DokumentBearbeitenDialog` |
-| 🔤 Umbenennen | `QInputDialog` |
-| 🗑 Löschen | dauerhaft mit Bestätigung |
+**Rechtsklick-Menü:** Im Explorer anzeigen · Öffnen · *(Separator)* · Bearbeiten · Umbenennen · Löschen
 
 **`_StellungnahmeDialog`:**
 - Scrollbarer Dialog, kontextabhängige Felder je Art
@@ -81,7 +92,42 @@ Art und Mitarbeiter werden aus der SQLite-DB per Dateiname nachgeschlagen. Kein 
 
 ---
 
-## 3. `functions/mitarbeiter_dokumente_functions.py`
+## 4. Verspätungs-Protokoll
+
+### `gui/mitarbeiter_dokumente.py` – `_VerspaetungDialog`
+
+| Feld | Beschreibung |
+|------|--------------|
+| Mitarbeiter | Freitext (Pflicht) |
+| Datum | Datum des Dienstes (dd.MM.yyyy) |
+| Dienstart | T · T10 · N · N10 |
+| Dienstbeginn | Soll-Zeit (HH:MM) |
+| Dienstantritt | Tatsächliche Ankunft (HH:MM) |
+| Verspätung | Auto berechnet (readonly) |
+| Begründung | Freitext |
+| Aufgenommen von | Freitext |
+
+Erstellt Word-Dokument + DB-Eintrag. Öffnen/Drucken auf Nachfrage.
+
+### Verspätungs-Protokoll Tab
+- Filter: Jahr, Monat, Freitext
+- Tabelle: Datum · Mitarbeiter · Dienst · Dienstbeginn · Dienstantritt · Verspätung · Aufgenommen von · ID
+- Buttons: Dokument öffnen · Bearbeiten · Per E-Mail senden · Löschen
+
+### `functions/verspaetung_db.py`
+
+| Funktion | Beschreibung |
+|----------|--------------|
+| `verspaetung_speichern(daten)` | Neuen Eintrag speichern → ID |
+| `verspaetung_aktualisieren(id, daten)` | Eintrag aktualisieren |
+| `verspaetung_loeschen(id)` | Eintrag löschen |
+| `lade_verspaetungen(monat, jahr, suchtext)` | Gefilterte Abfrage |
+| `lade_verspaetungen_fuer_datum(yyyy-MM-dd)` | Alle Einträge eines Tages |
+| `verfuegbare_jahre()` | Jahre mit Einträgen |
+
+---
+
+## 5. `functions/mitarbeiter_dokumente_functions.py`
 
 | Symbol | Beschreibung |
 |--------|-------------|
@@ -99,7 +145,7 @@ Art und Mitarbeiter werden aus der SQLite-DB per Dateiname nachgeschlagen. Kein 
 
 ---
 
-## 4. `functions/stellungnahmen_db.py`
+## 6. `functions/stellungnahmen_db.py`
 
 | Funktion | Beschreibung |
 |----------|-------------|
@@ -112,7 +158,7 @@ Art und Mitarbeiter werden aus der SQLite-DB per Dateiname nachgeschlagen. Kein 
 
 ---
 
-## 5. `functions/stellungnahmen_html_export.py`
+## 7. `functions/stellungnahmen_html_export.py`
 
 | Funktion | Beschreibung |
 |----------|-------------|
@@ -121,7 +167,7 @@ Art und Mitarbeiter werden aus der SQLite-DB per Dateiname nachgeschlagen. Kein 
 
 ---
 
-## 6. Dienstplan
+## 8. Dienstplan
 
 ### `gui/dienstplan.py` – `DienstplanWidget`
 - Excel laden, farbcodierte HTML-Tabelle
@@ -134,17 +180,33 @@ Art und Mitarbeiter werden aus der SQLite-DB per Dateiname nachgeschlagen. Kein 
 
 ---
 
-## 7. Übergabe
+## 9. Übergabe
 
 ### `gui/uebergabe.py` – `UebergabeWidget`
 - Tagdienst/Nachtdienst-Button, automatische Zeiten
 - Speichern · Abschließen · E-Mail-Entwurf · Löschen
-- `_email_erstellen()`: Protokолл + Fahrzeuge + Schäden + Handys
-  - **NEU:** Sektion „Stellungnahmen-Link" mit ComboBox für Fallverweis
+- Sektion **Verspätete Mitarbeiter**:
+  - Manuelle Zeilen (Name / Soll / Ist) · ➕ Hinzufügen
+  - Schreibgeschützte Zeilen aus `verspaetungen.db` (blau, „📋 MA-Doku"-Badge)
+- `_email_erstellen()`: Protokoll + Fahrzeuge + Schäden + Handys + Verspätete MA + Stellungnahmen-Link
+  - Zeitraumfilter (Von/Bis) mit Overnight-Support (z. B. 19:00–07:00)
+  - Folgetag + heutiges Datum werden zusätzlich aus `verspaetungen.db` geladen
+  - Checkboxen je Verspätung; MA-Doku-Einträge mit 📋 markiert
+
+**`uebergabe_verspaetungen`-Tabelle (nesk3.db):**
+```sql
+CREATE TABLE uebergabe_verspaetungen (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    protokoll_id INTEGER,
+    mitarbeiter  TEXT,
+    soll_zeit    TEXT,
+    ist_zeit     TEXT
+);
+```
 
 ---
 
-## 8. Fahrzeuge
+## 10. Fahrzeuge
 
 ### `gui/fahrzeuge.py` – `FahrzeugeWidget`
 - Status-Tab: aktuell + Verlauf; `_StatusBearbeitenDialog` (Doppelklick oder ✏)
@@ -156,25 +218,23 @@ Art und Mitarbeiter werden aus der SQLite-DB per Dateiname nachgeschlagen. Kein 
 
 ---
 
-## 9. Datenbank (SQLite)
+## 11. Datenbank (SQLite)
 
-### Haupt-DB (`nesk3.db`) – `database/`
-| Tabelle | Inhalt |
-|---------|--------|
-| `mitarbeiter` | name, kuerzel, funktion, export_flag |
-| `fahrzeuge` | kennzeichen, bezeichnung, typ |
-| `fahrzeug_status` | status, von, bis, grund |
-| `fahrzeug_schaeden` | datum, beschreibung, schwere |
-| `fahrzeug_termine` | titel, faellig_am, erledigt |
-| `uebergabe_protokolle` | schicht_typ, beginn, ende, inhalt, status |
-| `settings` | key, value |
+Alle 5 SQLite-DBs liegen unter `database SQL/`. Alle nutzen WAL-Modus (`busy_timeout = 5 s`).
 
-### Stellungnahmen-DB (`stellungnahmen.db`) – eigene SQLite-Datei
-Siehe Abschnitt 4 (stellungnahmen_db.py).
+| Datei | Inhalt | Zugriff |
+|-------|--------|---------|
+| `nesk3.db` | Hauptdaten (Fahrzeuge, Übergabe, Einstellungen) | `database/connection.py` |
+| `mitarbeiter.db` | Mitarbeiterstammdaten | `database/connection.py` |
+| `stellungnahmen.db` | Stellungnahmen-Metadaten | `functions/stellungnahmen_db.py` |
+| `verspaetungen.db` | Verspätungs-Protokolle | `functions/verspaetung_db.py` |
+| `archiv.db` | Archiv-Daten | separat |
+
+**`uebergabe_verspaetungen`** (in nesk3.db): Manuelle Verspätungseinträge je Protokoll
 
 ---
 
-## 10. Backup-System
+## 12. Backup-System
 
 - `create_zip_backup()` → `Backup Data/Nesk3_backup_YYYYMMDD_HHMMSS.zip`
 - `list_zip_backups()`, `restore_from_zip(zip_path)`
