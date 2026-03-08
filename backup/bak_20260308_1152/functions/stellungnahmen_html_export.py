@@ -1,0 +1,431 @@
+"""
+stellungnahmen_html_export.py
+Generiert eine vollständig statische HTML-Datei aus der Stellungnahmen-Datenbank.
+Die Datei läuft direkt per file:// ohne Web-Server.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from datetime import datetime
+
+# --------------------------------------------------------------------------- #
+#  Pfade                                                                       #
+# --------------------------------------------------------------------------- #
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_HTML_PATH = os.path.join(_BASE_DIR, "WebNesk", "stellungnahmen_lokal.html")
+
+
+def html_pfad() -> str:
+    """Gibt den absoluten Pfad der lokalen HTML-Datei zurück."""
+    return _HTML_PATH
+
+
+# --------------------------------------------------------------------------- #
+#  HTML-Template                                                               #
+# --------------------------------------------------------------------------- #
+_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stellungnahmen – Nesk3</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --card: #0f3460;
+    --accent: #e94560;
+    --accent2: #0f4c81;
+    --text: #eaeaea;
+    --muted: #aaaacc;
+    --border: #2a2a5a;
+    --tag-flug: #1e6bd6;
+    --tag-beschwerde: #d67b1e;
+    --tag-nm: #2e8b57;
+    --modal-bg: rgba(0,0,0,0.75);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  header { background: var(--card); padding: 16px 24px; display: flex; align-items: center; gap: 16px; border-bottom: 2px solid var(--accent); }
+  header h1 { font-size: 1.3rem; font-weight: 700; }
+  #gen-info { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
+  #filter-bar { background: var(--surface); padding: 12px 24px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--border); }
+  #filter-bar select, #filter-bar input { background: #22265a; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; }
+  #filter-bar button { background: var(--accent2); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 0.85rem; }
+  #filter-bar button:hover { opacity: 0.85; }
+  #count-label { font-size: 0.8rem; color: var(--muted); }
+  #list { padding: 16px 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+  .card:hover { border-color: var(--accent); box-shadow: 0 4px 18px rgba(233,69,96,0.18); }
+  .card.highlight { border-color: #ffd700; box-shadow: 0 0 18px rgba(255,215,0,0.35); animation: pulse 1.5s ease-out 3; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 10px rgba(255,215,0,0.35)} 50%{box-shadow:0 0 30px rgba(255,215,0,0.7)} }
+  .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .tag { font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+  .tag-flug { background: var(--tag-flug); }
+  .tag-beschwerde { background: var(--tag-beschwerde); }
+  .tag-nm { background: var(--tag-nm); }
+  .card-title { font-size: 0.95rem; font-weight: 600; flex: 1; }
+  .card-id { font-size: 0.7rem; color: var(--muted); }
+  .card-meta { font-size: 0.78rem; color: var(--muted); line-height: 1.7; }
+  .card-meta span { color: var(--text); }
+  #no-results { text-align: center; color: var(--muted); padding: 48px; grid-column: 1/-1; font-size: 1rem; }
+  /* Modal */
+  #modal-overlay { display: none; position: fixed; inset: 0; background: var(--modal-bg); z-index: 1000; align-items: center; justify-content: center; }
+  #modal-overlay.active { display: flex; }
+  #modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; width: min(700px, 95vw); max-height: 88vh; overflow-y: auto; padding: 28px; position: relative; }
+  #modal-box h2 { font-size: 1.1rem; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+  #modal-close { position: absolute; top: 16px; right: 18px; background: transparent; border: none; color: var(--muted); font-size: 1.4rem; cursor: pointer; }
+  #modal-close:hover { color: var(--accent); }
+  .detail-grid { display: grid; grid-template-columns: 160px 1fr; gap: 8px 12px; font-size: 0.85rem; }
+  .detail-grid .lbl { color: var(--muted); font-weight: 600; }
+  .detail-grid .val { color: var(--text); word-break: break-word; }
+  .detail-grid .val.path-val { font-family: monospace; font-size: 0.78rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .copy-btn { background: var(--accent2); color: #fff; border: none; border-radius: 5px; padding: 3px 10px; cursor: pointer; font-size: 0.75rem; }
+  .copy-btn:hover { opacity: 0.8; }
+  .copy-ok { color: #4cff91; font-size: 0.75rem; display: none; }
+  .section-hdr { grid-column: 1/-1; margin-top: 12px; font-weight: 700; color: var(--accent); font-size: 0.82rem; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .sachverhalt-block { grid-column: 1/-1; background: #131630; border-radius: 8px; padding: 10px 14px; font-size: 0.83rem; line-height: 1.6; white-space: pre-wrap; }
+  .dl-btn { background: #1a6e3a; color: #fff; border: none; border-radius: 5px; padding: 3px 10px; cursor: pointer; font-size: 0.75rem; text-decoration: none; display: inline-block; }
+  .dl-btn:hover { opacity: 0.8; }
+  .gelesen-badge { display: inline-block; background: #1a4a2e; color: #4cff91; border: 1px solid #2e8b57; border-radius: 12px; font-size: 0.68rem; padding: 2px 8px; margin-top: 5px; }
+  .gelesen-section { grid-column: 1/-1; margin-top: 14px; padding: 12px; background: #0d2a1a; border: 1px solid #2e8b57; border-radius: 8px; }
+  .gelesen-section p { font-size: 0.83rem; color: #4cff91; margin-bottom: 8px; }
+  .gelesen-name-input { background: #22265a; color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 5px 10px; font-size: 0.85rem; width: 220px; }
+  .gelesen-btn { background: #2e8b57; color: #fff; border: none; border-radius: 5px; padding: 5px 14px; cursor: pointer; font-size: 0.82rem; margin-left: 6px; }
+  .gelesen-btn:hover { opacity: 0.85; }
+  .ungelesen-btn { background: #6b2020; color: #fff; border: none; border-radius: 5px; padding: 4px 10px; cursor: pointer; font-size: 0.75rem; margin-top: 6px; }
+  .ungelesen-btn:hover { opacity: 0.85; }
+  /* toast */
+  #toast { position: fixed; bottom: 24px; right: 24px; background: #2e8b57; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 0.85rem; opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 9999; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <div>🏥 <b>DRK Flughafen Köln/Bonn</b></div>
+  <h1>📋 Stellungnahmen-Datenbank</h1>
+  <div id="gen-info">Generiert: __TIMESTAMP__</div>
+</header>
+<div id="filter-bar">
+  <select id="f-jahr"><option value="">Alle Jahre</option></select>
+  <select id="f-monat"><option value="">Alle Monate</option></select>
+  <select id="f-ungelesen"><option value="">Alle</option><option value="1">Nur ungelesen</option></select>
+  <select id="f-art">
+    <option value="">Alle Arten</option>
+    <option value="flug">✈️ Flug-Vorfall</option>
+    <option value="beschwerde">🗣️ Passagierbeschwerde</option>
+    <option value="nicht_mitgeflogen">🚶 Nicht mitgeflogen</option>
+  </select>
+  <input type="search" id="f-text" placeholder="🔍  Name, Flugnummer, Sachverhalt …" style="min-width:220px">
+  <button onclick="resetFilter()">↺ Zurücksetzen</button>
+  <span id="count-label"></span>
+</div>
+<div id="list"></div>
+<div id="no-results" style="display:none">Keine Stellungnahmen gefunden.</div>
+<div id="modal-overlay" onclick="closeModal(event)">
+  <div id="modal-box">
+    <button id="modal-close" onclick="closeModal()">×</button>
+    <h2 id="modal-title"></h2>
+    <div id="modal-body" class="detail-grid"></div>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+const DATA = __SN_DATA__;
+const MONATE = ["","Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+const ART_LABEL = {
+  "flug": "✈️ Flug-Vorfall",
+  "beschwerde": "🗣️ Beschwerde",
+  "nicht_mitgeflogen": "🚶 Nicht mitgeflogen"
+};
+const ART_TAG_CLASS = {
+  "flug": "tag-flug",
+  "beschwerde": "tag-beschwerde",
+  "nicht_mitgeflogen": "tag-nm"
+};
+
+// --- Gelesen-Verwaltung (localStorage)
+const GELESEN_KEY = "nesk3_sn_gelesen";
+function ladeGelesen() { try { return JSON.parse(localStorage.getItem(GELESEN_KEY)||"{}")} catch(e){return {};} }
+function speicherGelesen(id, name) {
+  const g = ladeGelesen(); g[id] = { name, datum: new Date().toLocaleString("de-DE") };
+  localStorage.setItem(GELESEN_KEY, JSON.stringify(g)); renderList();
+}
+function entferneGelesen(id) {
+  const g = ladeGelesen(); delete g[id];
+  localStorage.setItem(GELESEN_KEY, JSON.stringify(g)); renderList();
+}
+function istGelesen(id) { return !!ladeGelesen()[id]; }
+
+// --- Filter options
+function befuelleJahre() {
+  const jahre = [...new Set(DATA.map(e => (e.datum_vorfall||"")
+    .slice(-4)))].filter(Boolean).sort().reverse();
+  const sel = document.getElementById("f-jahr");
+  jahre.forEach(j => { const o = document.createElement("option"); o.value=j; o.textContent=j; sel.appendChild(o); });
+}
+function befuelleMonate() {
+  const MNAMES = ["","Januar","Februar","März","April","Mai","Juni",
+                  "Juli","August","September","Oktober","November","Dezember"];
+  const vorhanden = new Set(DATA.map(e => parseInt((e.datum_vorfall||"").split(".")[1]||"0")).filter(m => m > 0));
+  const sel = document.getElementById("f-monat");
+  for (let m = 1; m <= 12; m++) {
+    if (!vorhanden.has(m)) continue;
+    const o = document.createElement("option"); o.value=m; o.textContent=MNAMES[m]; sel.appendChild(o);
+  }
+}
+befuelleJahre(); befuelleMonate();
+
+function filteredData() {
+  const j = document.getElementById("f-jahr").value;
+  const m = document.getElementById("f-monat").value;
+  const a = document.getElementById("f-art").value;
+  const t = document.getElementById("f-text").value.toLowerCase().trim();
+  const nurUngelesen = document.getElementById("f-ungelesen").value === "1";
+  const gelesen = ladeGelesen();
+  return DATA.filter(e => {
+    const dv = e.datum_vorfall || "";
+    if (j && !dv.endsWith(j)) return false;
+    if (m) { const mo = parseInt(dv.split(".")[1]||"0"); if (mo !== parseInt(m)) return false; }
+    if (a && e.art !== a) return false;
+    if (nurUngelesen && gelesen[e.id]) return false;
+    if (t) {
+      const haystack = [(e.mitarbeiter||""),(e.flugnummer||""),(e.sachverhalt||""),(e.beschwerde_text||"")].join(" ").toLowerCase();
+      if (!haystack.includes(t)) return false;
+    }
+    return true;
+  });
+}
+
+function renderList() {
+  const list = document.getElementById("list");
+  const noRes = document.getElementById("no-results");
+  const fd = filteredData();
+  document.getElementById("count-label").textContent = fd.length + " Einträge";
+  list.innerHTML = "";
+  if (!fd.length) { noRes.style.display="block"; return; }
+  noRes.style.display="none";
+  const gelesen = ladeGelesen();
+  fd.forEach(e => {
+    const div = document.createElement("div");
+    div.className = "card";
+    div.id = "id-" + e.id;
+    const art = e.art || "";
+    const tagClass = ART_TAG_CLASS[art] || "";
+    const artLabel = ART_LABEL[art] || art;
+    const gInfo = gelesen[e.id];
+    const gBadge = gInfo ? `<div><span class="gelesen-badge">✅ Gelesen: ${gInfo.name}</span></div>` : "";
+    div.innerHTML = `
+      <div class="card-head">
+        <span class="tag ${tagClass}">${artLabel}</span>
+        <span class="card-title">${e.mitarbeiter||'–'}</span>
+        <span class="card-id">#${e.id}</span>
+      </div>
+      <div class="card-meta">
+        Vorfall: <span>${e.datum_vorfall||'–'}</span>
+        ${e.flugnummer ? ` &nbsp;|&nbsp; Flug: <span>${e.flugnummer}</span>` : ''}
+        <br>Verfasst: <span>${e.verfasst_am||'–'}</span>
+        ${e.onblock ? ` &nbsp;|&nbsp; On: <span>${e.onblock}</span>` : ''}
+        ${e.offblock ? ` Off: <span>${e.offblock}</span>` : ''}
+      </div>${gBadge}`;
+    div.addEventListener("click", () => openModal(e.id));
+    list.appendChild(div);
+  });
+  checkHash();
+}
+
+["f-jahr","f-monat","f-art","f-text","f-ungelesen"].forEach(id => {
+  document.getElementById(id).addEventListener("input", renderList);
+});
+
+function resetFilter() {
+  ["f-jahr","f-monat","f-art","f-ungelesen"].forEach(id => document.getElementById(id).value="");
+  document.getElementById("f-text").value="";
+  renderList();
+}
+
+// --- Modal
+function openModal(id) {
+  const e = DATA.find(x => x.id === id);
+  if (!e) return;
+  document.getElementById("modal-title").textContent =
+    `${ART_LABEL[e.art]||e.art}  –  ${e.mitarbeiter||'–'}  (#${e.id})`;
+  const body = document.getElementById("modal-body");
+  body.innerHTML = "";
+  function row(lbl, val) {
+    if (!val && val !== 0) return;
+    const l = document.createElement("div"); l.className="lbl"; l.textContent=lbl;
+    const v = document.createElement("div"); v.className="val"; v.textContent=val;
+    body.appendChild(l); body.appendChild(v);
+  }
+  function rowPath(lbl, pfad) {
+    if (!pfad) return;
+    const l = document.createElement("div"); l.className="lbl"; l.textContent=lbl;
+    const v = document.createElement("div"); v.className="val path-val";
+    const short = pfad.length > 60 ? "…" + pfad.slice(-57) : pfad;
+    const fname = pfad.split(/[\\/]/).pop();
+    const fileUrl = "file:///" + pfad.replace(/\\/g, "/");
+    v.innerHTML = `<span title="${pfad}">${short}</span>`;
+    // Download-Link
+    const dlA = document.createElement("a"); dlA.className="dl-btn";
+    dlA.href = fileUrl; dlA.textContent = "💾 Herunterladen";
+    dlA.setAttribute("download", fname); dlA.target = "_blank";
+    dlA.addEventListener("click", ev => ev.stopPropagation());
+    // Pfad kopieren
+    const btn = document.createElement("button"); btn.className="copy-btn"; btn.textContent="📋 Pfad";
+    const ok = document.createElement("span"); ok.className="copy-ok"; ok.textContent="✓ Kopiert";
+    btn.addEventListener("click", () => {
+      navigator.clipboard.writeText(pfad).then(() => {
+        ok.style.display="inline"; setTimeout(()=>ok.style.display="none",1800);
+      });
+    });
+    v.appendChild(dlA); v.appendChild(btn); v.appendChild(ok);
+    body.appendChild(l); body.appendChild(v);
+  }
+  function sectionHdr(text) {
+    const d = document.createElement("div"); d.className="section-hdr"; d.textContent=text;
+    body.appendChild(d);
+  }
+  sectionHdr("Allgemein");
+  row("ID", e.id);
+  row("Art", ART_LABEL[e.art]||e.art);
+  row("Mitarbeiter", e.mitarbeiter);
+  row("Datum Vorfall", e.datum_vorfall);
+  row("Verfasst am", e.verfasst_am);
+  row("Erstellt am", e.erstellt_am ? e.erstellt_am.replace("T"," ").slice(0,16) : null);
+
+  if (e.art === "flug" || e.art === "nicht_mitgeflogen" || e.flugnummer) {
+    sectionHdr("Flugdaten");
+    row("Flugnummer", e.flugnummer);
+    if (e.art === "flug") {
+      row("Verspätung", e.verspaetung ? "Ja" : "Nein");
+      if (e.verspaetung) { row("Onblock", e.onblock); row("Offblock", e.offblock); }
+      row("Richtung", e.richtung);
+      if (e.richtung && (e.richtung==="inbound"||e.richtung==="beides")) {
+        row("Ankunft LFZ", e.ankunft_lfz); row("Auftragsende", e.auftragsende);
+      }
+      if (e.richtung && (e.richtung==="outbound"||e.richtung==="beides")) {
+        row("Paxannahme-Zeit", e.paxannahme_zeit); row("Paxannahme-Ort", e.paxannahme_ort);
+      }
+    }
+  }
+  if (e.art === "beschwerde") {
+    sectionHdr("Flugzeiten");
+    row("Onblock", e.onblock); row("Offblock", e.offblock);
+  }
+
+  sectionHdr("Sachverhalt");
+  if (e.sachverhalt) {
+    const d = document.createElement("div"); d.className="sachverhalt-block"; d.textContent=e.sachverhalt;
+    body.appendChild(d);
+  }
+  if (e.beschwerde_text) {
+    sectionHdr("Beschwerdetext");
+    const d = document.createElement("div"); d.className="sachverhalt-block"; d.textContent=e.beschwerde_text;
+    body.appendChild(d);
+  }
+
+  sectionHdr("Dokumente");
+  rowPath("Intern", e.pfad_intern);
+  rowPath("Extern", e.pfad_extern);
+
+  // Gelesen-Sektion
+  const gSec = document.createElement("div"); gSec.className="gelesen-section";
+  gSec.style.gridColumn = "1/-1";
+  function renderGelesenSec() {
+    gSec.innerHTML = "";
+    const gInfo = ladeGelesen()[e.id];
+    if (gInfo) {
+      const p = document.createElement("p");
+      p.textContent = `✅ Gelesen von: ${gInfo.name}  –  ${gInfo.datum}`;
+      const uBtn = document.createElement("button"); uBtn.className="ungelesen-btn";
+      uBtn.textContent = "✕ Markierung entfernen";
+      uBtn.addEventListener("click", () => { entferneGelesen(e.id); renderGelesenSec(); });
+      gSec.appendChild(p); gSec.appendChild(uBtn);
+    } else {
+      const lbl = document.createElement("div"); lbl.style.cssText="font-size:0.8rem;color:var(--muted);margin-bottom:8px;"; lbl.textContent="Als gelesen markieren:";
+      const nameInput = document.createElement("input"); nameInput.className="gelesen-name-input";
+      nameInput.placeholder = "Dein Name …"; nameInput.type = "text";
+      const okBtn = document.createElement("button"); okBtn.className="gelesen-btn"; okBtn.textContent="✅ Bestätigen";
+      okBtn.addEventListener("click", () => {
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.style.borderColor="#e94560"; return; }
+        speicherGelesen(e.id, name); renderGelesenSec();
+        toast("Als gelesen markiert: " + name);
+      });
+      nameInput.addEventListener("keydown", ev => { if(ev.key==="Enter") okBtn.click(); });
+      gSec.appendChild(lbl); gSec.appendChild(nameInput); gSec.appendChild(okBtn);
+    }
+  }
+  renderGelesenSec();
+  body.appendChild(gSec);
+
+  document.getElementById("modal-overlay").classList.add("active");
+}
+
+function closeModal(ev) {
+  if (!ev || ev.target === document.getElementById("modal-overlay") || ev.currentTarget.id === "modal-close") {
+    document.getElementById("modal-overlay").classList.remove("active");
+  }
+}
+document.addEventListener("keydown", e => { if(e.key==="Escape") closeModal({}); });
+
+// --- URL-Hash Navigation
+function checkHash() {
+  const hash = location.hash;
+  if (!hash.startsWith("#id-")) return;
+  const id = parseInt(hash.slice(4));
+  if (!id) return;
+  const card = document.getElementById("id-" + id);
+  if (card) {
+    setTimeout(() => {
+      card.scrollIntoView({behavior:"smooth", block:"center"});
+      card.classList.add("highlight");
+      setTimeout(() => card.classList.remove("highlight"), 6000);
+    }, 300);
+  }
+}
+window.addEventListener("hashchange", checkHash);
+
+// Toast
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2500);
+}
+
+renderList();
+</script>
+</body>
+</html>
+"""
+
+
+# --------------------------------------------------------------------------- #
+#  Öffentliche API                                                             #
+# --------------------------------------------------------------------------- #
+
+def generiere_html() -> str:
+    """
+    Liest alle Stellungnahmen aus der Datenbank und schreibt
+    WebNesk/stellungnahmen_lokal.html.
+    Gibt den absoluten Pfad der generierten Datei zurück.
+    """
+    try:
+        from functions.stellungnahmen_db import lade_alle
+        eintraege = lade_alle()
+    except Exception:
+        eintraege = []
+
+    data_js = json.dumps(eintraege, ensure_ascii=False, indent=2)
+    timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+    html = _TEMPLATE.replace("__SN_DATA__", data_js).replace("__TIMESTAMP__", timestamp)
+
+    os.makedirs(os.path.dirname(_HTML_PATH), exist_ok=True)
+    with open(_HTML_PATH, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    return _HTML_PATH

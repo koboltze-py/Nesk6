@@ -809,10 +809,11 @@ class _PsaDialog(QDialog):
     """Dialog zum Erfassen eines PSA-Verstoßes (fehlende Schutzausrüstung)."""
 
     _PSA_TYPEN = [
-        "Oberteil",
-        "Hose",
+        "Sicherheitsweste",
+        "Handschuhe",
         "Sicherheitsschuhe",
-        "Warnweste",
+        "Schutzhelm",
+        "Sonstiges",
     ]
 
     def __init__(self, daten: dict | None = None, parent=None):
@@ -856,9 +857,7 @@ class _PsaDialog(QDialog):
         form.addRow("Datum *:", self._datum)
 
         self._psa_typ = QComboBox()
-        self._psa_typ.setEditable(True)
         self._psa_typ.addItems(self._PSA_TYPEN)
-        self._psa_typ.lineEdit().setPlaceholderText("Auswählen oder eigenen Typ eingeben …")
         form.addRow("PSA-Typ *:", self._psa_typ)
 
         self._bemerkung = QTextEdit()
@@ -1485,9 +1484,9 @@ class MitarbeiterDokumenteWidget(QWidget):
         layout.addWidget(filter_frame)
 
         self._psa_table = QTableWidget()
-        self._psa_table.setColumnCount(7)
+        self._psa_table.setColumnCount(6)
         self._psa_table.setHorizontalHeaderLabels([
-            "Datum", "Mitarbeiter", "PSA-Typ", "Bemerkung", "Aufgenommen von", "Versendet", "ID",
+            "Datum", "Mitarbeiter", "PSA-Typ", "Bemerkung", "Aufgenommen von", "ID",
         ])
         hh = self._psa_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -1496,7 +1495,6 @@ class MitarbeiterDokumenteWidget(QWidget):
         hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         self._psa_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._psa_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._psa_table.setAlternatingRowColors(True)
@@ -1573,24 +1571,20 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._psa_eintraege = eintraege
         self._psa_table.setRowCount(len(eintraege))
         for row, e in enumerate(eintraege):
-            gesendet = bool(e.get("gesendet"))
             row_data = [
                 e.get("datum", ""),
                 e.get("mitarbeiter", ""),
                 e.get("psa_typ", ""),
                 e.get("bemerkung", "") or "—",
                 e.get("aufgenommen_von", "") or "—",
-                "✅ Ja" if gesendet else "⬜ Nein",
                 str(e.get("id", "")),
             ]
             for col, text in enumerate(row_data):
                 item = QTableWidgetItem(text)
                 item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignCenter if col in (0, 2, 5, 6)
+                    Qt.AlignmentFlag.AlignCenter if col in (0, 2, 5)
                     else Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
                 )
-                if gesendet:
-                    item.setBackground(QColor("#e8f5e9"))
                 self._psa_table.setItem(row, col, item)
         n = len(eintraege)
         self._psa_treffer_lbl.setText(f"{n} Eintrag{'e' if n != 1 else ''}")

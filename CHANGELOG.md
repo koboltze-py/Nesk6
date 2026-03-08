@@ -5,7 +5,67 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
-## 05.03.2026 – v3.1.1
+## 08.03.2026 – v3.2.0
+
+### Telefonnummern-Verzeichnis (neues Modul)
+
+Neuer Sidebar-Button **📞 Telefonnummern** bei Index 11.  
+Liest Excel-Dateien aus `Daten/Telefonnummern/` in eine SQLite-Datenbank ein und stellt sie in einer tab-basierten GUI dar.
+
+#### `functions/telefonnummern_db.py` _(neu)_
+- SQLite-Datenbank `database SQL/telefonnummern.db` (WAL-Modus)
+- Tabellen: `telefonnummern` (id, erstellt_am, quelle, sheet, kategorie, bezeichnung, nummer, email, bemerkung), `tel_import_log`
+- `_CAT_NORMIERUNG`: Normalisiert rohe Excel-Spaltennamen auf saubere Kategorienamen
+  - z.B. `"Check In Nummern (02203 40-)"` → `"Check In B"`, `"Checkin C"` → `"Check In C"` usw.
+- `_parse_kontaktliste()`: Parst Kontaktsheets (Abt/Name/Tel/E-Mail-Format)
+- `_parse_grid_sheet()`: Parst Raster-Sheets (CIC, int Gate) mit Kategorienormalisierung
+- `importiere_aus_excel(clear_first=True)`: Importiert beide Excel-Dateien, gibt Anzahl zurück
+- `lade_telefonnummern(suchtext, kategorie, quelle, sheet)`: Gefiltertes SELECT
+- `lade_kategorien()`, `lade_sheets()`, `letzter_import()`: Hilfsfunktionen
+- `ist_db_leer()`, `hat_veraltete_daten()`: Zustandsprüfung (triggert Auto-Reimport)
+- `eintrag_speichern(daten)`: INSERT
+- `eintrag_aktualisieren(entry_id, daten)`: UPDATE
+- `eintrag_loeschen(entry_id)`: DELETE
+
+#### `gui/telefonnummern.py` _(neu)_
+- **4 Tabs**: 🔍 Alle · 📋 Kontakte · 🏪 Check-In (CIC) · 🚪 Interne & Gate
+- **Aktionsleiste**: 📥 Excel neu einlesen · ＋ Neu · ✏ Bearbeiten · 🗑 Löschen · 📋 Nummer kopieren · Suchfeld
+- **`_EintragDialog`**: Funktioniert für Neu-Anlage und Bearbeiten
+  - Bereich-Dropdown (`QComboBox`, editierbar): alle vorhandenen Sheets
+  - Kategorie-Dropdown (`QComboBox`, editierbar): Kategorien des gewählten Bereichs zuerst → logisches Einsortieren neuer Einträge
+  - Bearbeiten-Modus füllt alle Felder vor
+- Manuell eingetragene Zeilen gelb hervorgehoben (`#fff8e1`)
+- Doppelklick auf Zeile öffnet Bearbeiten-Dialog
+- Auto-Import beim ersten Start oder wenn veraltete Kategorienamen erkannt werden
+
+#### `gui/main_window.py`
+- `TelefonnummernWidget` eingehängt bei Index 11
+- Backup → 12, Einstellungen → 13
+
+---
+
+### PSA / Einsätze – Versendet-Tracking
+
+#### `functions/psa_db.py`
+- Spalte `gesendet` in Tabelle `psa_verstoss` ergänzt
+- `markiere_psa_gesendet(entry_id)`: Setzt `gesendet=1` + Zeitstempel
+
+#### `gui/dienstliches.py`
+- Spalte `gesendet` in Tabelle `einsaetze` ergänzt
+- `markiere_einsatz_gesendet(entry_id)`: Setzt `gesendet=1` + Zeitstempel
+- PSA-Tabelle: neue Spalte „Versendet" sichtbar
+- Einsatz-Tabelle: neue Spalte „Versendet" sichtbar
+
+#### `gui/uebergabe.py`
+- PSA-Verstöße werden im Übergabe-E-Mail-Dialog angezeigt (eigener Abschnitt)
+- Nach Versand: `markiere_psa_gesendet()` / `markiere_einsatz_gesendet()` wird aufgerufen
+
+#### `gui/mitarbeiter_dokumente.py` / `functions/mitarbeiter_dokumente_functions.py`
+- Kleinere Anpassungen im Zusammenhang mit PSA-Tracking
+
+---
+
+
 
 ### WAL-Modus für alle Datenbanken
 

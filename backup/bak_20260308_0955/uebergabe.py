@@ -1358,137 +1358,6 @@ class UebergabeWidget(QWidget):
         schaden_vl.addWidget(sch_scroll)
         dlg_layout.addWidget(schaden_frame)
 
-        # ── Einsätze des Tages ────────────────────────────────────────────────
-        try:
-            from gui.dienstliches import lade_einsaetze as _lade_einsaetze
-            _datum_dd = self._f_datum.date().toString("dd.MM.yyyy")
-            _einsatz_parts = _datum_dd.split(".")
-            alle_einsaetze = [
-                e for e in _lade_einsaetze()
-                if e.get("datum", "") == _datum_dd
-            ]
-        except Exception:
-            alle_einsaetze = []
-
-        einsatz_frame = QFrame()
-        einsatz_frame.setStyleSheet(
-            "QFrame{border:1px solid #5a9060;border-radius:5px;background:#f0faf2;}"
-        )
-        einsatz_vl = QVBoxLayout(einsatz_frame)
-        einsatz_vl.setContentsMargins(10, 8, 10, 8)
-        einsatz_vl.setSpacing(4)
-
-        einz_lbl = QLabel(
-            f"🚑 Einsätze des Tages ({_datum_dd})  —  {len(alle_einsaetze)} Einsatz/Einsätze"
-        )
-        einz_lbl.setStyleSheet("font-weight:bold;font-size:11px;border:none;")
-        einsatz_vl.addWidget(einz_lbl)
-
-        einz_scroll = _QSA()
-        einz_scroll.setWidgetResizable(True)
-        einz_scroll.setMaximumHeight(120)
-        einz_scroll.setStyleSheet("QScrollArea{border:none;}")
-        einz_inner = QWidget()
-        einz_inner.setStyleSheet("background:transparent;")
-        einz_inner_vl = QVBoxLayout(einz_inner)
-        einz_inner_vl.setContentsMargins(0, 0, 0, 0)
-        einz_inner_vl.setSpacing(2)
-
-        _einsatz_checkboxes: list[tuple] = []
-
-        for _e in alle_einsaetze:
-            _ang = "✅" if _e.get("angenommen") else "❌"
-            _stw = _e.get("einsatzstichwort", "") or "—"
-            _ort = _e.get("einsatzort", "") or "—"
-            _uhr = _e.get("uhrzeit", "") or "—"
-            _ma1 = _e.get("drk_ma1", "") or ""
-            _ma2 = _e.get("drk_ma2", "") or ""
-            _ma_txt = f"  MA: {', '.join(filter(None, [_ma1, _ma2]))}" if (_ma1 or _ma2) else ""
-            _ecb = QCheckBox(
-                f"{_ang} {_uhr}  |  {_stw}  |  {_ort}{_ma_txt}"
-            )
-            _ecb.setChecked(True)
-            _ecb.setStyleSheet("font-size:10px;")
-            einz_inner_vl.addWidget(_ecb)
-            _einsatz_checkboxes.append((_ecb, _e))
-
-        if not alle_einsaetze:
-            _no_e = QLabel("Keine Einsätze für diesen Tag erfasst.")
-            _no_e.setStyleSheet("color:#aaa;font-size:10px;border:none;padding:4px;")
-            einz_inner_vl.addWidget(_no_e)
-
-        einz_scroll.setWidget(einz_inner)
-        einsatz_vl.addWidget(einz_scroll)
-        dlg_layout.addWidget(einsatz_frame)
-
-        # ── PSA-Verstöße des Tages ────────────────────────────────────────────
-        try:
-            from functions.psa_db import lade_psa_fuer_datum as _lade_psa
-            alle_psa = _lade_psa(_datum_dd)
-        except Exception:
-            alle_psa = []
-
-        offene_psa   = [p for p in alle_psa if not p.get("gesendet")]
-        gesendet_psa = [p for p in alle_psa if p.get("gesendet")]
-
-        psa_frame = QFrame()
-        psa_frame.setStyleSheet(
-            "QFrame{border:1px solid #a06030;border-radius:5px;background:#fff8f0;}"
-        )
-        psa_vl = QVBoxLayout(psa_frame)
-        psa_vl.setContentsMargins(10, 8, 10, 8)
-        psa_vl.setSpacing(4)
-
-        _anz_psa_offen = len(offene_psa)
-        _anz_psa_ges   = len(gesendet_psa)
-        psa_lbl = QLabel(
-            f"🦺 PSA-Verstöße ({_datum_dd})  —  "
-            f"{_anz_psa_offen} offen / ungesendet    {_anz_psa_ges} bereits gesendet"
-        )
-        psa_lbl.setStyleSheet("font-weight:bold;font-size:11px;border:none;")
-        psa_vl.addWidget(psa_lbl)
-
-        psa_scroll = _QSA()
-        psa_scroll.setWidgetResizable(True)
-        psa_scroll.setMaximumHeight(120)
-        psa_scroll.setStyleSheet("QScrollArea{border:none;}")
-        psa_inner = QWidget()
-        psa_inner.setStyleSheet("background:transparent;")
-        psa_inner_vl = QVBoxLayout(psa_inner)
-        psa_inner_vl.setContentsMargins(0, 0, 0, 0)
-        psa_inner_vl.setSpacing(2)
-
-        _psa_checkboxes: list[tuple] = []
-
-        for _p in offene_psa:
-            _psa_cb = QCheckBox(
-                f"🦺 {_p.get('mitarbeiter','?')}  |  {_p.get('psa_typ','?')}  |  "
-                f"{_p.get('bemerkung','') or '—'}  (aufgen.: {_p.get('aufgenommen_von','') or '—'})"
-            )
-            _psa_cb.setChecked(True)
-            _psa_cb.setStyleSheet("font-size:10px;")
-            psa_inner_vl.addWidget(_psa_cb)
-            _psa_checkboxes.append((_psa_cb, _p))
-
-        for _p in gesendet_psa:
-            _psa_cb2 = QCheckBox(
-                f"✅ {_p.get('mitarbeiter','?')}  |  {_p.get('psa_typ','?')}  |  "
-                f"{_p.get('bemerkung','') or '—'}  [bereits gesendet]"
-            )
-            _psa_cb2.setChecked(False)
-            _psa_cb2.setEnabled(False)
-            _psa_cb2.setStyleSheet("font-size:10px;color:#aaa;")
-            psa_inner_vl.addWidget(_psa_cb2)
-
-        if not alle_psa:
-            _no_psa = QLabel("Keine PSA-Verstöße für diesen Tag erfasst.")
-            _no_psa.setStyleSheet("color:#aaa;font-size:10px;border:none;padding:4px;")
-            psa_inner_vl.addWidget(_no_psa)
-
-        psa_scroll.setWidget(psa_inner)
-        psa_vl.addWidget(psa_scroll)
-        dlg_layout.addWidget(psa_frame)
-
         # ── Verspätete Mitarbeiter – Zeitraumfilter ───────────────────────────
         try:
             alle_vsp = lade_verspaetungen(pid) if pid else []
@@ -1795,40 +1664,6 @@ class UebergabeWidget(QWidget):
                     _vsp_lines.append(f"  • {_n}  –  Gefordert: {_s}  Tatsächlich: {_i}{_d}")
                 body_text += "\n" + "\n".join(_vsp_lines)
 
-            # Einsätze in Body einbauen
-            _checked_einz = [(_cb, _e) for _cb, _e in _einsatz_checkboxes if _cb.isChecked()]
-            if _checked_einz:
-                _einz_lines = ["", "─" * 38, "🚑 Einsätze:", "─" * 38]
-                for _, _e in _checked_einz:
-                    _ang = "✅ angenommen" if _e.get("angenommen") else "❌ abgelehnt"
-                    _stw = _e.get("einsatzstichwort", "") or "—"
-                    _ort = _e.get("einsatzort", "") or "—"
-                    _uhr = _e.get("uhrzeit", "") or "—"
-                    _dur = _e.get("einsatzdauer", 0) or 0
-                    _ma1 = _e.get("drk_ma1", "") or ""
-                    _ma2 = _e.get("drk_ma2", "") or ""
-                    _ma_txt = f"  MA: {', '.join(filter(None, [_ma1, _ma2]))}" if (_ma1 or _ma2) else ""
-                    _nr = _e.get("einsatznr_drk", "") or ""
-                    _nr_txt = f"  Nr.: {_nr}" if _nr else ""
-                    _dur_txt = f"  Dauer: {_dur} Min." if _dur else ""
-                    _einz_lines.append(
-                        f"  • {_uhr}  |  {_stw}  |  {_ort}  |  {_ang}{_nr_txt}{_ma_txt}{_dur_txt}"
-                    )
-                    if _e.get("bemerkung"):
-                        _einz_lines.append(f"       Bemerkung: {_e['bemerkung']}")
-                body_text += "\n" + "\n".join(_einz_lines)
-
-            # PSA-Verstöße in Body einbauen
-            _checked_psa = [(_cb, _p) for _cb, _p in _psa_checkboxes if _cb.isChecked()]
-            if _checked_psa:
-                _psa_lines = ["", "─" * 38, "🦺 PSA-Verstöße:", "─" * 38]
-                for _, _p in _checked_psa:
-                    _psa_lines.append(
-                        f"  • {_p.get('mitarbeiter','?')}  |  {_p.get('psa_typ','?')}  |  "
-                        f"{_p.get('bemerkung','') or '—'}  (aufgen.: {_p.get('aufgenommen_von','') or '—'})"
-                    )
-                body_text += "\n" + "\n".join(_psa_lines)
-
             to_val = an_edit.text().strip()
             cc_val = cc_edit.text().strip()
             subj   = subj_edit.text().strip()
@@ -1862,18 +1697,6 @@ class UebergabeWidget(QWidget):
                 for _, s in checked:
                     try:
                         markiere_schaden_gesendet(s["id"])
-                    except Exception:
-                        pass
-                for _, _e in _checked_einz:
-                    try:
-                        from gui.dienstliches import markiere_einsatz_gesendet as _mark_einz
-                        _mark_einz(_e["id"])
-                    except Exception:
-                        pass
-                for _, _p in _checked_psa:
-                    try:
-                        from functions.psa_db import markiere_psa_gesendet as _mark_psa
-                        _mark_psa(_p["id"])
                     except Exception:
                         pass
                 dlg.accept()

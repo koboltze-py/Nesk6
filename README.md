@@ -3,8 +3,8 @@
 **DRK Flughafen Köln – Erste-Hilfe-Station**  
 Dienstplan-Verwaltung, Stärkemeldung und Mitarbeiterverwaltung
 
-**Version:** v2.9.4 (26.02.2026)  
-**Module:** Dashboard · Dienstplan · Aufgaben Nacht/Tag · Sonderaufgaben · Übergabe · Fahrzeuge · Code 19 · Mitarbeiter · Einstellungen · Hilfe
+**Version:** v3.2.0 (08.03.2026)  
+**Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · Ma. Ausdrucke · Krankmeldungen · **Telefonnummern** · Backup · Einstellungen · Hilfe
 
 ---
 

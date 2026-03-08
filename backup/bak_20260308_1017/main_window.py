@@ -30,7 +30,6 @@ from gui.dokument_browser       import DokumentBrowserWidget
 from gui.mitarbeiter            import MitarbeiterHauptWidget
 from gui.hilfe_dialog           import HilfeDialog
 from gui.dienstliches           import DienstlichesWidget
-from gui.telefonnummern         import TelefonnummernWidget
 
 
 NAV_ITEMS = [
@@ -45,9 +44,8 @@ NAV_ITEMS = [
     ("🕐", "Code 19",          8),
     ("🖨️", "Ma. Ausdrucke",   9),
     ("🤒", "Krankmeldungen",  10),
-    ("�", "Telefonnummern",  11),
-    ("💾", "Backup",          12),
-    ("⚙️",  "Einstellungen",  13),
+    ("💾", "Backup",          11),
+    ("⚙️",  "Einstellungen",  12),
 ]
 
 NAV_TOOLTIPS = [
@@ -62,7 +60,6 @@ NAV_TOOLTIPS = [
     "Code-19-Protokoll führen und Uhrzeigen-Animation",
     "Vordrucke öffnen und drucken (Ordner: Daten/Vordrucke)",
     "Krankmeldungsformulare öffnen (Ordner: 03_Krankmeldungen)",
-    "Telefonnummern-Verzeichnis: FKB Gate-/Check-In-Nummern und DRK-Kontakte",
     "Datensicherung erstellen und wiederherstellen",
     "App-Einstellungen, Pfade und E-Mobby-Fahrerliste",
 ]
@@ -242,8 +239,6 @@ class MainWindow(QMainWindow):
             "🤒 Krankmeldungen", _KRANKMELD_PATH, allow_subfolders=True
         )
 
-        self._telefonnummern_page = TelefonnummernWidget()
-
         self._backup_page        = self._placeholder_page("💾 Backup", "Backup-Verwaltung wird implementiert.")
         self._settings_page      = EinstellungenWidget()
 
@@ -253,7 +248,6 @@ class MainWindow(QMainWindow):
                      self._dienstplan_page, self._uebergabe_page,
                      self._fahrzeuge_page, self._code19_page,
                      self._ausdrucke_page, self._krankmeldungen_page,
-                     self._telefonnummern_page,
                      self._backup_page, self._settings_page]:
             self._stack.addWidget(page)
 
@@ -293,7 +287,6 @@ class MainWindow(QMainWindow):
             8: self._code19_page.refresh,
             9: self._ausdrucke_page.refresh,
             10: self._krankmeldungen_page.refresh,
-            11: self._telefonnummern_page.refresh,
         }
         if index in page_map:
             QTimer.singleShot(0, page_map[index])

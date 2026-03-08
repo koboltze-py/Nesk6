@@ -1,8 +1,8 @@
 # Nesk3 – Technische Dokumentation
 
-**Stand:** 05.03.2026  
+**Stand:** 08.03.2026  
 **Anwendung:** Nesk3 – DRK Flughafen Köln  
-**Zweck:** Dienstplan-Verwaltung, Stärkemeldung, Mitarbeiterverwaltung, Einsatzprotokoll, Verspätungs-Meldungen
+**Zweck:** Dienstplan-Verwaltung, Stärkemeldung, Mitarbeiterverwaltung, Einsatzprotokoll, Verspätungs-Meldungen, Telefonnummern-Verzeichnis, PSA-Tracking
 
 ---
 
@@ -28,7 +28,7 @@ Nesk3/
 ├── config.py                        # Globale Konstanten (Farben, Pfade, DB-Name)
 │
 ├── gui/
-│   ├── main_window.py               # Hauptfenster, Sidebar-Navigation (13 Seiten)
+│   ├── main_window.py               # Hauptfenster, Sidebar-Navigation (14 Seiten)
 │   ├── dashboard.py                 # Dashboard (Statistik-Karten, Flugzeug-Animation)
 │   ├── dienstplan.py                # Dienstplan-Tab (Excel-Import, Tabelle, Export, 4 Panes)
 │   ├── dienstliches.py              # Dienstliches: Einsatzprotokoll + Übersicht [NEU]
@@ -41,6 +41,7 @@ Nesk3/
 │   ├── mitarbeiter.py               # Mitarbeiter-Verwaltung
 │   ├── mitarbeiter_dokumente.py     # Mitarbeiterdokumente + Stellungnahmen + Verspätung
 │   ├── einstellungen.py             # Einstellungen (Pfade, E-Mobby-Fahrerverwaltung)
+│   ├── telefonnummern.py            # Telefonnummern-Verzeichnis (4 Tabs, Import, CRUD) [NEU]
 │   └── checklisten.py               # Checklisten-Tab
 │
 ├── functions/
@@ -48,6 +49,8 @@ Nesk3/
 │   ├── dienstplan_functions.py      # DB-Funktionen für Dienstplan
 │   ├── dienstplan_html_export.py    # Statische HTML-Ansicht generieren [NEU]
 │   ├── emobby_functions.py          # E-Mobby-Fahrerliste (TXT↔DB-Sync, Matching)
+│   ├── psa_db.py                    # PSA-Verstöße: gesendet-Tracking [NEU]
+│   ├── telefonnummern_db.py         # Telefonnummern SQLite-Backend (Import, CRUD) [NEU]
 │   ├── fahrzeug_functions.py        # DB-Funktionen für Fahrzeuge
 │   ├── mail_functions.py            # Outlook-COM-Integration
 │   ├── mitarbeiter_dokumente_functions.py  # Kategorien, Dokumenten-Funktionen
