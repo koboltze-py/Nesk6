@@ -95,6 +95,15 @@ CREATE TABLE IF NOT EXISTS verbrauchsmaterial (
     einheit          TEXT    DEFAULT 'Stk',
     FOREIGN KEY (patienten_id) REFERENCES patienten(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS medikamente (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    patienten_id     INTEGER NOT NULL,
+    medikament       TEXT    NOT NULL,
+    dosis            TEXT    DEFAULT '',
+    applikation      TEXT    DEFAULT '',
+    FOREIGN KEY (patienten_id) REFERENCES patienten(id) ON DELETE CASCADE
+);
 """
 
 
@@ -227,6 +236,11 @@ def patient_speichern(daten: dict, verbrauchsmaterial: list[dict]) -> int:
                 "INSERT INTO verbrauchsmaterial (patienten_id, material, menge, einheit) VALUES (?, ?, ?, ?)",
                 (patienten_id, vm.get("material", ""), vm.get("menge", 1), vm.get("einheit", "Stk"))
             )
+        for med in daten.get("_medikamente", []):
+            con.execute(
+                "INSERT INTO medikamente (patienten_id, medikament, dosis, applikation) VALUES (?, ?, ?, ?)",
+                (patienten_id, med.get("medikament", ""), med.get("dosis", ""), med.get("applikation", ""))
+            )
         return patienten_id
 
 
@@ -297,6 +311,12 @@ def patient_aktualisieren(row_id: int, daten: dict, verbrauchsmaterial: list[dic
                 "INSERT INTO verbrauchsmaterial (patienten_id, material, menge, einheit) VALUES (?, ?, ?, ?)",
                 (row_id, vm.get("material", ""), vm.get("menge", 1), vm.get("einheit", "Stk"))
             )
+        con.execute("DELETE FROM medikamente WHERE patienten_id=?", (row_id,))
+        for med in daten.get("_medikamente", []):
+            con.execute(
+                "INSERT INTO medikamente (patienten_id, medikament, dosis, applikation) VALUES (?, ?, ?, ?)",
+                (row_id, med.get("medikament", ""), med.get("dosis", ""), med.get("applikation", ""))
+            )
 
 
 def patient_loeschen(row_id: int) -> None:
@@ -340,6 +360,15 @@ def lade_verbrauchsmaterial(patienten_id: int) -> list[dict]:
     with _patienten_db() as con:
         rows = con.execute(
             "SELECT * FROM verbrauchsmaterial WHERE patienten_id=? ORDER BY id",
+            (patienten_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def lade_medikamente(patienten_id: int) -> list[dict]:
+    with _patienten_db() as con:
+        rows = con.execute(
+            "SELECT * FROM medikamente WHERE patienten_id=? ORDER BY id",
             (patienten_id,)
         ).fetchall()
     return [dict(r) for r in rows]
@@ -965,6 +994,7 @@ class _EinsatzDialog(QDialog):
 def export_patient_word(
     patient: dict,
     verbrauchsmaterial: list[dict],
+    medikamente: list[dict] | None = None,
     ziel_pfad: str | None = None,
 ) -> str:
     """
@@ -1125,8 +1155,27 @@ def export_patient_word(
     _abschnitt("7 │ Behandlung durch DRK")
     _row("Diagnose / Einweisung", patient.get("diagnose", ""))
     _row("Maßnahmen",             patient.get("massnahmen", ""))
-    _row("Medikamentengabe",      "Ja" if patient.get("medikamente_gegeben") else "Nein")
-    _row("Medikament(e)",         patient.get("medikamente_gegeben_was", ""))
+    # Medikamentengabe als Tabelle
+    _med_liste = medikamente or []
+    if _med_liste:
+        _abschnitt_med = doc.add_paragraph()
+        _abschnitt_med.paragraph_format.space_before = Pt(4)
+        _abschnitt_med.add_run("  Medikamente gegeben:").bold = True
+        _abschnitt_med.runs[0].font.size = Pt(9)
+        med_word_tbl = doc.add_table(rows=1 + len(_med_liste), cols=3)
+        med_word_tbl.style = "Table Grid"
+        for _i, _h in enumerate(["Medikament", "Dosis", "Applikation"]):
+            _cw = med_word_tbl.rows[0].cells[_i]
+            _rcw = _cw.paragraphs[0].add_run(_h)
+            _rcw.bold = True
+            _rcw.font.size = Pt(9)
+            _set_cell_bg(_cw, "E8EFF8")
+        for _ri, _m in enumerate(_med_liste, start=1):
+            med_word_tbl.rows[_ri].cells[0].paragraphs[0].add_run(_m.get("medikament", "")).font.size = Pt(9)
+            med_word_tbl.rows[_ri].cells[1].paragraphs[0].add_run(_m.get("dosis", "") or "—").font.size = Pt(9)
+            med_word_tbl.rows[_ri].cells[2].paragraphs[0].add_run(_m.get("applikation", "") or "—").font.size = Pt(9)
+    else:
+        _row("Medikamentengabe", "Nein")
 
     # ── 8. Verbrauchsmaterial ─────────────────────────────────────────────────
     _abschnitt("8 │ Verbrauchsmaterial")
@@ -1216,6 +1265,7 @@ class _PatientenDialog(QDialog):
         super().__init__(parent)
         self._edit_daten = daten
         self._verbrauchsmaterial_liste: list[dict] = []
+        self._medikamente_liste: list[dict] = []
         self.setWindowTitle(
             "✏️  Patient bearbeiten" if daten
             else "🏥  Patienten erfassen – DRK Station"
@@ -1251,6 +1301,7 @@ class _PatientenDialog(QDialog):
         layout.addWidget(self._build_grp_monitoring())
         layout.addWidget(self._build_grp_vorerkrankungen())
         layout.addWidget(self._build_grp_behandlung())
+        layout.addWidget(self._build_grp_medikamente())
         layout.addWidget(self._build_grp_material())
         layout.addWidget(self._build_grp_arbeitsunfall())
         layout.addWidget(self._build_grp_personal())
@@ -1444,17 +1495,37 @@ class _PatientenDialog(QDialog):
         f.addRow("Maßnahmen / Behandlung *:", self._massnahmen)
         self._diagnose = self._te("Diagnose / Verdachtsdiagnose …", 55)
         f.addRow("Diagnose:", self._diagnose)
-        med_w = QWidget()
-        med_l = QHBoxLayout(med_w)
-        med_l.setContentsMargins(0, 0, 0, 0)
-        self._medikamente_cb = QCheckBox("Medikamente verabreicht")
-        self._medikamente_cb.setStyleSheet("font-size:12px;")
-        self._medikamente_gegeben_was = self._le("welche Medikamente / Dosis …")
-        self._medikamente_gegeben_was.setEnabled(False)
-        self._medikamente_cb.toggled.connect(self._medikamente_gegeben_was.setEnabled)
-        med_l.addWidget(self._medikamente_cb)
-        med_l.addWidget(self._medikamente_gegeben_was, 1)
-        f.addRow("Medikamentengabe:", med_w)
+        return g
+
+    def _build_grp_medikamente(self) -> QGroupBox:
+        g = QGroupBox("💊  Medikamentengabe durch DRK")
+        g.setStyleSheet(self._GROUP_STYLE)
+        med_layout = QVBoxLayout(g)
+        med_layout.setSpacing(8)
+        btn_add = QPushButton("➕  Medikament hinzufügen")
+        btn_add.setFixedHeight(32)
+        btn_add.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_add.setStyleSheet(
+            "QPushButton{background:#1565a8;color:white;border:none;"
+            "border-radius:4px;padding:4px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#0d47a1;}"
+        )
+        btn_add.clicked.connect(self._medikament_hinzufuegen)
+        med_layout.addWidget(btn_add, 0, Qt.AlignmentFlag.AlignLeft)
+        self._medikament_table = QTableWidget()
+        self._medikament_table.setColumnCount(4)
+        self._medikament_table.setHorizontalHeaderLabels(["Medikament", "Dosis", "Applikation", ""])
+        mh = self._medikament_table.horizontalHeader()
+        mh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        mh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        mh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        mh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self._medikament_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._medikament_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._medikament_table.setMaximumHeight(150)
+        self._medikament_table.verticalHeader().setVisible(False)
+        self._medikament_table.setStyleSheet("font-size:12px;")
+        med_layout.addWidget(self._medikament_table)
         return g
 
     def _build_grp_material(self) -> QGroupBox:
@@ -1529,6 +1600,61 @@ class _PatientenDialog(QDialog):
         self._bemerkung = self._te("Zusätzliche Hinweise …", 55)
         lay.addWidget(self._bemerkung)
         return g
+
+    # ── Medikamente ───────────────────────────────────────────────────────────────────────
+    def _medikament_hinzufuegen(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Medikament hinzufügen")
+        dlg.setMinimumWidth(400)
+        layout = QVBoxLayout(dlg)
+        fl = QFormLayout()
+        med_edit = QLineEdit()
+        med_edit.setPlaceholderText("z.B. Aspirin, Glucose, Sauerstoff …")
+        dosis_edit = QLineEdit()
+        dosis_edit.setPlaceholderText("z.B. 500 mg, 4 l/min, 40%")
+        applikation_combo = QComboBox()
+        applikation_combo.addItems(["", "oral", "sublingual", "inhalativ", "intravenös (IV)", "subkutan", "intramuskulär", "intranasal", "topisch"])
+        applikation_combo.setEditable(True)
+        fl.addRow("Medikament:", med_edit)
+        fl.addRow("Dosis:", dosis_edit)
+        fl.addRow("Applikation:", applikation_combo)
+        layout.addLayout(fl)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(lambda: dlg.accept() if med_edit.text().strip() else None)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            medikament = med_edit.text().strip()
+            if medikament:
+                self._medikamente_liste.append({
+                    "medikament":   medikament,
+                    "dosis":        dosis_edit.text().strip(),
+                    "applikation":  applikation_combo.currentText().strip(),
+                })
+                self._aktualisiere_medikament_tabelle()
+
+    def _aktualisiere_medikament_tabelle(self):
+        self._medikament_table.setRowCount(len(self._medikamente_liste))
+        for row, med in enumerate(self._medikamente_liste):
+            self._medikament_table.setItem(row, 0, QTableWidgetItem(med.get("medikament", "")))
+            self._medikament_table.setItem(row, 1, QTableWidgetItem(med.get("dosis", "")))
+            self._medikament_table.setItem(row, 2, QTableWidgetItem(med.get("applikation", "")))
+            btn_del = QPushButton("🗑")
+            btn_del.setFixedSize(28, 28)
+            btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_del.setStyleSheet(
+                "QPushButton{background:#ffcccc;border:none;border-radius:3px;}"
+                "QPushButton:hover{background:#ff9999;}"
+            )
+            btn_del.clicked.connect(lambda checked, r=row: self._medikament_entfernen(r))
+            self._medikament_table.setCellWidget(row, 3, btn_del)
+
+    def _medikament_entfernen(self, row: int):
+        if 0 <= row < len(self._medikamente_liste):
+            self._medikamente_liste.pop(row)
+            self._aktualisiere_medikament_tabelle()
 
     # ── Verbrauchsmaterial ──────────────────────────────────────────────────────────────────
     def _material_hinzufuegen(self):
@@ -1646,9 +1772,10 @@ class _PatientenDialog(QDialog):
         # Behandlung
         self._massnahmen.setPlainText(d.get("massnahmen", ""))
         self._diagnose.setPlainText(d.get("diagnose", ""))
-        med_geg = bool(d.get("medikamente_gegeben", 0))
-        self._medikamente_cb.setChecked(med_geg)
-        self._medikamente_gegeben_was.setText(d.get("medikamente_gegeben_was", ""))
+        # Medikamente
+        if "id" in d:
+            self._medikamente_liste = lade_medikamente(d["id"])
+            self._aktualisiere_medikament_tabelle()
         # Arbeitsunfall
         self._arbeitsunfall_cb.setChecked(bool(d.get("arbeitsunfall", 0)))
         self._arbeitsunfall_details.setText(d.get("arbeitsunfall_details", ""))
@@ -1706,8 +1833,9 @@ class _PatientenDialog(QDialog):
             "medikamente_patient":     self._medikamente_patient.toPlainText().strip(),
             "massnahmen":              self._massnahmen.toPlainText().strip(),
             "diagnose":                self._diagnose.toPlainText().strip(),
-            "medikamente_gegeben":     1 if self._medikamente_cb.isChecked() else 0,
-            "medikamente_gegeben_was": self._medikamente_gegeben_was.text().strip(),
+            "medikamente_gegeben":     1 if self._medikamente_liste else 0,
+            "medikamente_gegeben_was": ", ".join(m["medikament"] for m in self._medikamente_liste),
+            "_medikamente":            self._medikamente_liste,
             "arbeitsunfall":           1 if self._arbeitsunfall_cb.isChecked() else 0,
             "arbeitsunfall_details":   self._arbeitsunfall_details.text().strip(),
             "drk_ma1":                 self._drk_ma1.text().strip(),
@@ -2128,7 +2256,8 @@ class _PatientenTab(QWidget):
         eintrag = self._eintraege[row]
         try:
             material = lade_verbrauchsmaterial(eintrag["id"])
-            pfad = export_patient_word(eintrag, material)
+            medikamente = lade_medikamente(eintrag["id"])
+            pfad = export_patient_word(eintrag, material, medikamente)
         except Exception as exc:
             QMessageBox.critical(self, "Fehler beim Word-Export", str(exc))
             return
@@ -2150,7 +2279,8 @@ class _PatientenTab(QWidget):
         # Word-Datei erstellen
         try:
             material = lade_verbrauchsmaterial(eintrag["id"])
-            word_pfad = export_patient_word(eintrag, material)
+            medikamente = lade_medikamente(eintrag["id"])
+            word_pfad = export_patient_word(eintrag, material, medikamente)
         except Exception as exc:
             QMessageBox.critical(self, "Fehler beim Word-Export", str(exc))
             return

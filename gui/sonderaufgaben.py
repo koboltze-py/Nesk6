@@ -138,6 +138,7 @@ class SonderaufgabenWidget(QWidget):
         self._tag_emobby:        list[str] = []
         self._nacht_emobby:      list[str] = []
         self._dienstplan_geladen: bool = False
+        self._dienstplan_pfad:   str  = ""
         self._fs_model: QFileSystemModel | None = None
 
         self._build_ui()
@@ -178,6 +179,13 @@ class SonderaufgabenWidget(QWidget):
         btn_load.setMinimumWidth(160)
         btn_load.clicked.connect(self._load_dienstplan)
         header_layout.addWidget(btn_load)
+
+        self._btn_open_dienstplan = QPushButton("📋 Dienstplan öffnen")
+        self._btn_open_dienstplan.setStyleSheet(_btn_style("#17a2b8", "#117a8b"))
+        self._btn_open_dienstplan.setMinimumWidth(160)
+        self._btn_open_dienstplan.setEnabled(False)
+        self._btn_open_dienstplan.clicked.connect(self._open_dienstplan_excel)
+        header_layout.addWidget(self._btn_open_dienstplan)
 
         btn_save = QPushButton("💾 Speichern")
         btn_save.setStyleSheet(_btn_style(FIORI_SUCCESS, "#0a5c2f"))
@@ -306,7 +314,7 @@ class SonderaufgabenWidget(QWidget):
         # ── Sektion 2: Bulmor-Fahrten ────────────────────────────────────────
         sec2 = self._make_section("🚗 Bulmor-Fahrten (nur Bulmor-Fahrer)")
         grid2 = self._make_grid_in_section(sec2)
-        self._add_header_row(grid2, 0)
+        self._add_header_row(grid2, 0, show_status=True)
         for i, name in enumerate(
             ["Bulmor 1 - 7312", "Bulmor 2 - 7892", "Bulmor 3 - 8092",
              "Bulmor 4 - 8794", "Bulmor 5 - 9982"], start=1
@@ -420,8 +428,11 @@ class SonderaufgabenWidget(QWidget):
         section.layout().addLayout(grid)
         return grid
 
-    def _add_header_row(self, grid: QGridLayout, row: int):
-        for col, text in enumerate(["Aufgabe", "Tagdienst (Auswahl)", "Tagdienst (Name)", "Nachtdienst (Auswahl)", "Nachtdienst (Name)"]):
+    def _add_header_row(self, grid: QGridLayout, row: int, show_status: bool = False):
+        headers = ["Aufgabe", "Tagdienst (Auswahl)", "Tagdienst (Name)", "Nachtdienst (Auswahl)", "Nachtdienst (Name)"]
+        if show_status:
+            headers.append("Fahrzeugstatus")
+        for col, text in enumerate(headers):
             lbl = QLabel(text)
             lbl.setFont(QFont("Arial", 10, QFont.Weight.Bold))
             lbl.setStyleSheet(f"color: #666; border-bottom: 1px solid {FIORI_BORDER}; padding-bottom: 4px;")
@@ -453,12 +464,18 @@ class SonderaufgabenWidget(QWidget):
             combo.setFixedHeight(30)
             combo.setStyleSheet(_combo_style())
             if mitarbeiter:
-                combo.addItems(["— bitte wählen —"] + mitarbeiter)
+                items = ["\u2014 bitte wählen \u2014"] + mitarbeiter
+                if nur_bulmor:
+                    items.append("a.D.")
+                combo.addItems(items)
             elif is_emobby and self._dienstplan_geladen:
-                combo.addItems(["⚠ Kein E-Mobby-Fahrer auf dieser Schicht – bitte prüfen!"])
+                combo.addItems(["\u26a0 Kein E-Mobby-Fahrer auf dieser Schicht \u2013 bitte prüfen!"])
                 combo.setStyleSheet(_combo_style() + "QComboBox { color: #cc6600; font-weight: bold; }")
             else:
-                combo.addItems(["— Dienstplan laden —"])
+                base_items = ["\u2014 Dienstplan laden \u2014"]
+                if nur_bulmor:
+                    base_items.append("a.D.")
+                combo.addItems(base_items)
 
             line = QLineEdit()
             line.setFixedHeight(30)
@@ -476,7 +493,57 @@ class SonderaufgabenWidget(QWidget):
 
             self._entries[key] = {"combo": combo, "line": line, "nur_bulmor": nur_bulmor}
 
-    def _combo_to_line(self, key: str, choice: str):
+        # Fahrzeugstatus-Badge für Bulmor-Zeilen
+        if nur_bulmor:
+            kennzeichen = name.split("-")[-1].strip() if "-" in name else ""
+            status_lbl = QLabel(self._bulmor_status_text(kennzeichen))
+            status_lbl.setFont(QFont("Arial", 11))
+            status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            status_lbl.setStyleSheet(self._bulmor_status_style(kennzeichen))
+            status_lbl.setFixedHeight(30)
+            grid.addWidget(status_lbl, row, 5)
+
+    def _bulmor_status_text(self, kennzeichen: str) -> str:
+        """Gibt den angezeigten Status-Text für ein Bulmor-Fahrzeug zurück."""
+        try:
+            from functions.fahrzeug_functions import lade_alle_fahrzeuge
+            fahrzeuge = lade_alle_fahrzeuge()
+            for fz in fahrzeuge:
+                if kennzeichen and kennzeichen in str(fz.get("kennzeichen", "")):
+                    st = fz.get("aktueller_status") or ""
+                    mapping = {
+                        "fahrbereit":   "🟢 fahrbereit",
+                        "defekt":       "🔴 defekt",
+                        "werkstatt":    "🟡 Werkstatt",
+                        "ausser_dienst": "⚫ a.D.",
+                        "sonstiges":    "🔵 sonstiges",
+                    }
+                    return mapping.get(st, f"❓ {st}" if st else "❓ unbekannt")
+        except Exception:
+            pass
+        return "❓ unbekannt"
+
+    def _bulmor_status_style(self, kennzeichen: str) -> str:
+        """Gibt den CSS-Style passend zum Fahrzeugstatus zurück."""
+        try:
+            from functions.fahrzeug_functions import lade_alle_fahrzeuge
+            fahrzeuge = lade_alle_fahrzeuge()
+            for fz in fahrzeuge:
+                if kennzeichen and kennzeichen in str(fz.get("kennzeichen", "")):
+                    st = fz.get("aktueller_status") or ""
+                    color_map = {
+                        "fahrbereit":    ("#e8f5e9", "#2e7d32"),
+                        "defekt":        ("#ffebee", "#c62828"),
+                        "werkstatt":     ("#fff8e1", "#f57f17"),
+                        "ausser_dienst": ("#eeeeee", "#424242"),
+                        "sonstiges":     ("#e3f2fd", "#1565c0"),
+                    }
+                    bg, fg = color_map.get(st, ("#f5f5f5", "#888"))
+                    return (f"background:{bg}; color:{fg}; border-radius:4px;"
+                            f" padding:2px 6px; font-weight:bold;")
+        except Exception:
+            pass
+        return "color:#888; font-style:italic;"
         """Dropdown-Auswahl in Textfeld übertragen. Bulmor: mehrere mit / anhängen."""
         if not choice or choice in ("— bitte wählen —", "— Dienstplan laden —") \
                 or choice.startswith("⚠"):
@@ -512,7 +579,18 @@ class SonderaufgabenWidget(QWidget):
         )
         if not filepath:
             return
+        self._dienstplan_pfad = filepath
         self._parse_dienstplan(filepath)
+
+    def _open_dienstplan_excel(self):
+        """Geladene Dienstplan-Datei in Excel öffnen."""
+        if not self._dienstplan_pfad or not os.path.isfile(self._dienstplan_pfad):
+            QMessageBox.warning(self, "Nicht verfügbar", "Kein Dienstplan geladen oder Datei nicht gefunden.")
+            return
+        try:
+            os.startfile(self._dienstplan_pfad)
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler", f"Datei konnte nicht geöffnet werden:\n{exc}")
 
     def _parse_dienstplan(self, filepath: str):
         """Mitarbeiter aus Dienstplan-Excel extrahieren und Dropdowns befüllen."""
@@ -628,6 +706,7 @@ class SonderaufgabenWidget(QWidget):
             self._tag_emobby        = tag_emobby
             self._nacht_emobby      = nacht_emobby
             self._dienstplan_geladen = True
+            self._btn_open_dienstplan.setEnabled(True)
 
             # Formular neu aufbauen mit neuen Daten
             self._build_form()

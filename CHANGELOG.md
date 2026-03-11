@@ -5,6 +5,32 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
+## 11.03.2026 – v3.4.0
+
+### Medikamentengabe als Tabelle, Sonderaufgaben-Erweiterungen, Dienstplan-Verbesserungen
+
+#### `gui/dienstliches.py`
+- **Medikamentengabe** komplett neu als Tabelle (wie Verbrauchsmaterial):
+  - Neue DB-Tabelle `medikamente (id, patienten_id, medikament, dosis, applikation)` mit CASCADE-FK
+  - Neue Funktion `lade_medikamente(patienten_id)`
+  - `patient_speichern()` / `patient_aktualisieren()` speichern Medikamenteneinträge aus `daten["_medikamente"]`
+  - `_build_grp_medikamente()`: neue Gruppe mit Tabelle (Medikament / Dosis / Applikation) und „➕ Medikament hinzufügen"-Button
+  - `_medikament_hinzufuegen()`, `_aktualisiere_medikament_tabelle()`, `_medikament_entfernen()` als neue Methoden
+  - `_befuellen()` lädt beim Bearbeiten Medikamente aus DB
+  - `export_patient_word()`: neuer Parameter `medikamente`, Abschnitt 7 zeigt Medikamenten-Tabelle
+  - `_word_protokoll()` / `_mail_protokoll()` laden und übergeben Medikamente
+
+#### `gui/sonderaufgaben.py`
+- **Bulmor-Dropdowns**: Option „a.D." immer verfügbar (auch ohne Dienstplan)
+- **Fahrzeugstatus-Spalte**: jede Bulmor-Zeile zeigt aktuellen Status (fahrbereit/defekt/Werkstatt/a.D.) aus der Fahrzeug-DB mit Farb-Badge
+- **„📋 Dienstplan öffnen"-Button**: nach Laden des Dienstplans wird Datei direkt in Excel geöffnet
+
+#### `gui/dienstplan.py`
+- **„📊 In Excel öffnen"-Button** in jedem Dienstplan-Pane-Header (aktiv nach Laden)
+- **Nach Stärkemeldungs-Export**: Ja/Nein-Dialog „Jetzt in Word öffnen?" + „Kopie speichern unter…"-Dialog
+
+---
+
 ## 11.03.2026 – v3.3.0
 
 ### Patienten DRK Station – vollständiges medizinisches Protokoll

@@ -722,6 +722,17 @@ class _DienstplanPane(QWidget):
         self._export_btn.clicked.connect(lambda: self.export_selected.emit(self._pane_index))
         header_layout.addWidget(self._export_btn)
 
+        self._excel_open_btn = QPushButton('📊 In Excel öffnen')
+        self._excel_open_btn.setFixedHeight(22)
+        self._excel_open_btn.setEnabled(False)
+        self._excel_open_btn.setToolTip('Dienstplan-Excel-Datei in Excel öffnen')
+        self._excel_open_btn.setStyleSheet(
+            'font-size: 10px; padding: 0 6px; border-radius: 3px; '
+            'background: #107e3e; color: white; border: none;'
+        )
+        self._excel_open_btn.clicked.connect(self._open_in_excel)
+        header_layout.addWidget(self._excel_open_btn)
+
         self._close_btn = QPushButton('X')
         self._close_btn.setFixedSize(22, 22)
         self._close_btn.setStyleSheet(
@@ -805,6 +816,16 @@ class _DienstplanPane(QWidget):
 
     # ---------- Laden ----------
 
+    def _open_in_excel(self):
+        """Geladene Dienstplan-Excel-Datei direkt in Excel öffnen."""
+        if not self._excel_path or not os.path.isfile(self._excel_path):
+            QMessageBox.warning(self, 'Nicht verfügbar', 'Datei nicht gefunden.')
+            return
+        try:
+            os.startfile(self._excel_path)
+        except Exception as exc:
+            QMessageBox.critical(self, 'Fehler', f'Datei konnte nicht geöffnet werden:\n{exc}')
+
     def load(self, path: str) -> bool:
         """Excel-Datei einlesen und Tabelle befüllen. Gibt True bei Erfolg zurück."""
         self._status_lbl.setText(' Datei wird eingelesen ...')
@@ -829,6 +850,7 @@ class _DienstplanPane(QWidget):
             self._excel_path   = path
             self._display_data = display_result
             self._parsed_data  = export_result
+            self._excel_open_btn.setEnabled(True)
 
             # Dateiname im Header anzeigen
             dateiname = os.path.basename(path)
@@ -1663,10 +1685,26 @@ class DienstplanWidget(QWidget):
                     "Export abgeschlossen mit Hinweisen:\n\n" + "\n".join(warnungen)
                 )
 
-            QMessageBox.information(
+            antwort = QMessageBox.question(
                 self, "Export erfolgreich",
-                f"Staerkemeldung gespeichert unter:\n{pfad}"
+                f"Stärkemeldung gespeichert unter:\n{pfad}\n\nJetzt in Word öffnen?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
             )
+            if antwort == QMessageBox.StandardButton.Yes:
+                os.startfile(pfad)
+
+            # Nochmal nach anderem Speicherort fragen (z.B. für E-Mail-Anhang)
+            kopie_pfad, _ = QFileDialog.getSaveFileName(
+                self,
+                "Kopie speichern unter …",
+                pfad,
+                "Word-Dokumente (*.docx)",
+            )
+            if kopie_pfad:
+                import shutil
+                shutil.copy2(pfad, kopie_pfad)
+
             pane._status_lbl.setText(f"Word-Export: {os.path.basename(pfad)}")
             pane._status_lbl.setStyleSheet("color: #107e3e; padding: 2px 0;")
 
