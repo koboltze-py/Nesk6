@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QTextEdit,
     QComboBox, QDateEdit, QTimeEdit, QSpinBox, QRadioButton,
     QButtonGroup, QMessageBox, QSizePolicy, QScrollArea, QGroupBox,
-    QCheckBox
+    QCheckBox, QGridLayout
 )
 from PySide6.QtCore import Qt, QDate, QTime
 from PySide6.QtGui import QFont, QColor
@@ -31,6 +31,333 @@ from config import FIORI_BLUE, FIORI_TEXT, BASE_DIR, FIORI_BORDER
 _EINSATZ_DB_DIR  = os.path.join(BASE_DIR, "database SQL")
 _EINSATZ_DB_PFAD = os.path.join(_EINSATZ_DB_DIR, "einsaetze.db")
 _EINSATZ_PROTO_DIR = os.path.join(BASE_DIR, "Daten", "Einsatz")
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Patienten DRK Station - Datenbank
+# ══════════════════════════════════════════════════════════════════════════════
+
+_PATIENTEN_DB_PFAD = os.path.join(_EINSATZ_DB_DIR, "patienten_station.db")
+
+_CREATE_PATIENTEN_SQL = """
+CREATE TABLE IF NOT EXISTS patienten (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    erstellt_am             TEXT    NOT NULL,
+    datum                   TEXT    NOT NULL,
+    uhrzeit                 TEXT    NOT NULL,
+    behandlungsdauer        INTEGER DEFAULT 0,
+    -- Patient
+    patient_typ             TEXT    DEFAULT '',
+    patient_abteilung       TEXT    DEFAULT '',
+    patient_name            TEXT    DEFAULT '',
+    patient_alter           INTEGER DEFAULT 0,
+    geschlecht              TEXT    DEFAULT '',
+    -- Ereignis
+    hergang_was             TEXT    DEFAULT '',
+    hergang_wie             TEXT    DEFAULT '',
+    unfall_ort              TEXT    DEFAULT '',
+    -- Beschwerdebild
+    beschwerde_art          TEXT    DEFAULT '',
+    symptome                TEXT    DEFAULT '',
+    -- ABCDE
+    abcde_a                 TEXT    DEFAULT '',
+    abcde_b                 TEXT    DEFAULT '',
+    abcde_c                 TEXT    DEFAULT '',
+    abcde_d                 TEXT    DEFAULT '',
+    abcde_e                 TEXT    DEFAULT '',
+    -- Monitoring
+    monitoring_bz           TEXT    DEFAULT '',
+    monitoring_rr           TEXT    DEFAULT '',
+    monitoring_spo2         TEXT    DEFAULT '',
+    monitoring_hf           TEXT    DEFAULT '',
+    -- Vorerkrankungen & Medikamente des Patienten
+    vorerkrankungen         TEXT    DEFAULT '',
+    medikamente_patient     TEXT    DEFAULT '',
+    -- Behandlung
+    diagnose                TEXT    DEFAULT '',
+    massnahmen              TEXT    DEFAULT '',
+    medikamente_gegeben     INTEGER DEFAULT 0,
+    medikamente_gegeben_was TEXT    DEFAULT '',
+    -- Arbeitsunfall
+    arbeitsunfall           INTEGER DEFAULT 0,
+    arbeitsunfall_details   TEXT    DEFAULT '',
+    -- Personal & Abschluss
+    drk_ma1                 TEXT    DEFAULT '',
+    drk_ma2                 TEXT    DEFAULT '',
+    weitergeleitet          TEXT    DEFAULT '',
+    bemerkung               TEXT    DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS verbrauchsmaterial (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    patienten_id     INTEGER NOT NULL,
+    material         TEXT    NOT NULL,
+    menge            INTEGER DEFAULT 1,
+    einheit          TEXT    DEFAULT 'Stk',
+    FOREIGN KEY (patienten_id) REFERENCES patienten(id) ON DELETE CASCADE
+);
+"""
+
+
+def _ensured_patienten_db() -> str:
+    _NEW_COLS = [
+        ("patient_typ",             "TEXT DEFAULT ''"),
+        ("patient_abteilung",       "TEXT DEFAULT ''"),
+        ("hergang_was",             "TEXT DEFAULT ''"),
+        ("hergang_wie",             "TEXT DEFAULT ''"),
+        ("unfall_ort",              "TEXT DEFAULT ''"),
+        ("beschwerde_art",          "TEXT DEFAULT ''"),
+        ("abcde_a",                 "TEXT DEFAULT ''"),
+        ("abcde_b",                 "TEXT DEFAULT ''"),
+        ("abcde_c",                 "TEXT DEFAULT ''"),
+        ("abcde_d",                 "TEXT DEFAULT ''"),
+        ("abcde_e",                 "TEXT DEFAULT ''"),
+        ("monitoring_bz",           "TEXT DEFAULT ''"),
+        ("monitoring_rr",           "TEXT DEFAULT ''"),
+        ("monitoring_spo2",         "TEXT DEFAULT ''"),
+        ("monitoring_hf",           "TEXT DEFAULT ''"),
+        ("vorerkrankungen",         "TEXT DEFAULT ''"),
+        ("medikamente_patient",     "TEXT DEFAULT ''"),
+        ("medikamente_gegeben",     "INTEGER DEFAULT 0"),
+        ("medikamente_gegeben_was", "TEXT DEFAULT ''"),
+        ("arbeitsunfall",           "INTEGER DEFAULT 0"),
+        ("arbeitsunfall_details",   "TEXT DEFAULT ''"),
+    ]
+    os.makedirs(_EINSATZ_DB_DIR, exist_ok=True)
+    con = sqlite3.connect(_PATIENTEN_DB_PFAD, timeout=5)
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA synchronous  = NORMAL")
+    con.execute("PRAGMA busy_timeout  = 5000")
+    con.execute("PRAGMA foreign_keys = ON")
+    con.executescript(_CREATE_PATIENTEN_SQL)
+    for col, typ in _NEW_COLS:
+        try:
+            con.execute(f"ALTER TABLE patienten ADD COLUMN {col} {typ}")
+        except Exception:
+            pass  # Spalte existiert bereits
+    con.commit()
+    con.close()
+    return _PATIENTEN_DB_PFAD
+
+
+@contextmanager
+def _patienten_db():
+    _ensured_patienten_db()
+    con = sqlite3.connect(_PATIENTEN_DB_PFAD, timeout=5)
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA synchronous  = NORMAL")
+    con.execute("PRAGMA busy_timeout  = 5000")
+    con.execute("PRAGMA foreign_keys = ON")
+    con.row_factory = sqlite3.Row
+    try:
+        yield con
+        con.commit()
+    finally:
+        con.close()
+
+
+def patient_speichern(daten: dict, verbrauchsmaterial: list[dict]) -> int:
+    with _patienten_db() as con:
+        cur = con.execute(
+            """
+            INSERT INTO patienten (
+                erstellt_am, datum, uhrzeit, behandlungsdauer,
+                patient_typ, patient_abteilung, patient_name, patient_alter, geschlecht,
+                hergang_was, hergang_wie, unfall_ort,
+                beschwerde_art, symptome,
+                abcde_a, abcde_b, abcde_c, abcde_d, abcde_e,
+                monitoring_bz, monitoring_rr, monitoring_spo2, monitoring_hf,
+                vorerkrankungen, medikamente_patient,
+                diagnose, massnahmen, medikamente_gegeben, medikamente_gegeben_was,
+                arbeitsunfall, arbeitsunfall_details,
+                drk_ma1, drk_ma2, weitergeleitet, bemerkung
+            ) VALUES (
+                :erstellt_am, :datum, :uhrzeit, :behandlungsdauer,
+                :patient_typ, :patient_abteilung, :patient_name, :patient_alter, :geschlecht,
+                :hergang_was, :hergang_wie, :unfall_ort,
+                :beschwerde_art, :symptome,
+                :abcde_a, :abcde_b, :abcde_c, :abcde_d, :abcde_e,
+                :monitoring_bz, :monitoring_rr, :monitoring_spo2, :monitoring_hf,
+                :vorerkrankungen, :medikamente_patient,
+                :diagnose, :massnahmen, :medikamente_gegeben, :medikamente_gegeben_was,
+                :arbeitsunfall, :arbeitsunfall_details,
+                :drk_ma1, :drk_ma2, :weitergeleitet, :bemerkung
+            )
+            """,
+            {
+                "erstellt_am":             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "datum":                   daten.get("datum", ""),
+                "uhrzeit":                 daten.get("uhrzeit", ""),
+                "behandlungsdauer":        daten.get("behandlungsdauer", 0),
+                "patient_typ":             daten.get("patient_typ", ""),
+                "patient_abteilung":       daten.get("patient_abteilung", ""),
+                "patient_name":            daten.get("patient_name", ""),
+                "patient_alter":           daten.get("patient_alter", 0),
+                "geschlecht":              daten.get("geschlecht", ""),
+                "hergang_was":             daten.get("hergang_was", ""),
+                "hergang_wie":             daten.get("hergang_wie", ""),
+                "unfall_ort":              daten.get("unfall_ort", ""),
+                "beschwerde_art":          daten.get("beschwerde_art", ""),
+                "symptome":                daten.get("symptome", ""),
+                "abcde_a":                 daten.get("abcde_a", ""),
+                "abcde_b":                 daten.get("abcde_b", ""),
+                "abcde_c":                 daten.get("abcde_c", ""),
+                "abcde_d":                 daten.get("abcde_d", ""),
+                "abcde_e":                 daten.get("abcde_e", ""),
+                "monitoring_bz":           daten.get("monitoring_bz", ""),
+                "monitoring_rr":           daten.get("monitoring_rr", ""),
+                "monitoring_spo2":         daten.get("monitoring_spo2", ""),
+                "monitoring_hf":           daten.get("monitoring_hf", ""),
+                "vorerkrankungen":         daten.get("vorerkrankungen", ""),
+                "medikamente_patient":     daten.get("medikamente_patient", ""),
+                "diagnose":                daten.get("diagnose", ""),
+                "massnahmen":              daten.get("massnahmen", ""),
+                "medikamente_gegeben":     daten.get("medikamente_gegeben", 0),
+                "medikamente_gegeben_was": daten.get("medikamente_gegeben_was", ""),
+                "arbeitsunfall":           daten.get("arbeitsunfall", 0),
+                "arbeitsunfall_details":   daten.get("arbeitsunfall_details", ""),
+                "drk_ma1":                 daten.get("drk_ma1", ""),
+                "drk_ma2":                 daten.get("drk_ma2", ""),
+                "weitergeleitet":          daten.get("weitergeleitet", ""),
+                "bemerkung":               daten.get("bemerkung", ""),
+            },
+        )
+        patienten_id = cur.lastrowid
+        for vm in verbrauchsmaterial:
+            con.execute(
+                "INSERT INTO verbrauchsmaterial (patienten_id, material, menge, einheit) VALUES (?, ?, ?, ?)",
+                (patienten_id, vm.get("material", ""), vm.get("menge", 1), vm.get("einheit", "Stk"))
+            )
+        return patienten_id
+
+
+def patient_aktualisieren(row_id: int, daten: dict, verbrauchsmaterial: list[dict]) -> None:
+    with _patienten_db() as con:
+        con.execute(
+            """
+            UPDATE patienten SET
+                datum=:datum, uhrzeit=:uhrzeit, behandlungsdauer=:behandlungsdauer,
+                patient_typ=:patient_typ, patient_abteilung=:patient_abteilung,
+                patient_name=:patient_name, patient_alter=:patient_alter, geschlecht=:geschlecht,
+                hergang_was=:hergang_was, hergang_wie=:hergang_wie, unfall_ort=:unfall_ort,
+                beschwerde_art=:beschwerde_art, symptome=:symptome,
+                abcde_a=:abcde_a, abcde_b=:abcde_b, abcde_c=:abcde_c,
+                abcde_d=:abcde_d, abcde_e=:abcde_e,
+                monitoring_bz=:monitoring_bz, monitoring_rr=:monitoring_rr,
+                monitoring_spo2=:monitoring_spo2, monitoring_hf=:monitoring_hf,
+                vorerkrankungen=:vorerkrankungen, medikamente_patient=:medikamente_patient,
+                diagnose=:diagnose, massnahmen=:massnahmen,
+                medikamente_gegeben=:medikamente_gegeben,
+                medikamente_gegeben_was=:medikamente_gegeben_was,
+                arbeitsunfall=:arbeitsunfall, arbeitsunfall_details=:arbeitsunfall_details,
+                drk_ma1=:drk_ma1, drk_ma2=:drk_ma2,
+                weitergeleitet=:weitergeleitet, bemerkung=:bemerkung
+            WHERE id=:id
+            """,
+            {
+                "id":                      row_id,
+                "datum":                   daten.get("datum", ""),
+                "uhrzeit":                 daten.get("uhrzeit", ""),
+                "behandlungsdauer":        daten.get("behandlungsdauer", 0),
+                "patient_typ":             daten.get("patient_typ", ""),
+                "patient_abteilung":       daten.get("patient_abteilung", ""),
+                "patient_name":            daten.get("patient_name", ""),
+                "patient_alter":           daten.get("patient_alter", 0),
+                "geschlecht":              daten.get("geschlecht", ""),
+                "hergang_was":             daten.get("hergang_was", ""),
+                "hergang_wie":             daten.get("hergang_wie", ""),
+                "unfall_ort":              daten.get("unfall_ort", ""),
+                "beschwerde_art":          daten.get("beschwerde_art", ""),
+                "symptome":                daten.get("symptome", ""),
+                "abcde_a":                 daten.get("abcde_a", ""),
+                "abcde_b":                 daten.get("abcde_b", ""),
+                "abcde_c":                 daten.get("abcde_c", ""),
+                "abcde_d":                 daten.get("abcde_d", ""),
+                "abcde_e":                 daten.get("abcde_e", ""),
+                "monitoring_bz":           daten.get("monitoring_bz", ""),
+                "monitoring_rr":           daten.get("monitoring_rr", ""),
+                "monitoring_spo2":         daten.get("monitoring_spo2", ""),
+                "monitoring_hf":           daten.get("monitoring_hf", ""),
+                "vorerkrankungen":         daten.get("vorerkrankungen", ""),
+                "medikamente_patient":     daten.get("medikamente_patient", ""),
+                "diagnose":                daten.get("diagnose", ""),
+                "massnahmen":              daten.get("massnahmen", ""),
+                "medikamente_gegeben":     daten.get("medikamente_gegeben", 0),
+                "medikamente_gegeben_was": daten.get("medikamente_gegeben_was", ""),
+                "arbeitsunfall":           daten.get("arbeitsunfall", 0),
+                "arbeitsunfall_details":   daten.get("arbeitsunfall_details", ""),
+                "drk_ma1":                 daten.get("drk_ma1", ""),
+                "drk_ma2":                 daten.get("drk_ma2", ""),
+                "weitergeleitet":          daten.get("weitergeleitet", ""),
+                "bemerkung":               daten.get("bemerkung", ""),
+            },
+        )
+        con.execute("DELETE FROM verbrauchsmaterial WHERE patienten_id=?", (row_id,))
+        for vm in verbrauchsmaterial:
+            con.execute(
+                "INSERT INTO verbrauchsmaterial (patienten_id, material, menge, einheit) VALUES (?, ?, ?, ?)",
+                (row_id, vm.get("material", ""), vm.get("menge", 1), vm.get("einheit", "Stk"))
+            )
+
+
+def patient_loeschen(row_id: int) -> None:
+    with _patienten_db() as con:
+        con.execute("DELETE FROM patienten WHERE id=?", (row_id,))
+
+
+def lade_patienten(
+    *,
+    monat: int | None = None,
+    jahr: int | None = None,
+    suchtext: str | None = None,
+) -> list[dict]:
+    where_parts: list[str] = []
+    params: list = []
+    if monat is not None:
+        where_parts.append("substr(datum,4,2)=?")
+        params.append(f"{monat:02d}")
+    if jahr is not None:
+        where_parts.append("substr(datum,7,4)=?")
+        params.append(str(jahr))
+    if suchtext:
+        t = f"%{suchtext}%"
+        where_parts.append(
+            "(patient_name LIKE ? OR symptome LIKE ? OR diagnose LIKE ?"
+            " OR hergang_was LIKE ? OR beschwerde_art LIKE ?"
+            " OR massnahmen LIKE ? OR unfall_ort LIKE ?"
+            " OR drk_ma1 LIKE ? OR drk_ma2 LIKE ?)"
+        )
+        params.extend([t, t, t, t, t, t, t, t, t])
+    sql = "SELECT * FROM patienten"
+    if where_parts:
+        sql += " WHERE " + " AND ".join(where_parts)
+    sql += " ORDER BY substr(datum,7,4)||substr(datum,4,2)||substr(datum,1,2) DESC, id DESC"
+    with _patienten_db() as con:
+        rows = con.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def lade_verbrauchsmaterial(patienten_id: int) -> list[dict]:
+    with _patienten_db() as con:
+        rows = con.execute(
+            "SELECT * FROM verbrauchsmaterial WHERE patienten_id=? ORDER BY id",
+            (patienten_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def verfuegbare_jahre_patienten() -> list[int]:
+    with _patienten_db() as con:
+        rows = con.execute(
+            "SELECT DISTINCT substr(datum,7,4) AS j FROM patienten"
+            " WHERE length(datum)=10 ORDER BY j DESC"
+        ).fetchall()
+    result = []
+    for r in rows:
+        try:
+            result.append(int(r["j"]))
+        except (ValueError, TypeError):
+            pass
+    return result
 
 _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS einsaetze (
@@ -207,6 +534,7 @@ def markiere_einsatz_gesendet(row_id: int) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 _PROTOKOLL_DIR = os.path.join(_EINSATZ_PROTO_DIR, "Protokolle")
+_PATIENTEN_PROTO_DIR = os.path.join(BASE_DIR, "Daten", "Patienten Station", "Protokolle")
 
 
 def export_einsaetze_excel(
@@ -628,6 +956,1233 @@ class _EinsatzDialog(QDialog):
             grund_abgelehnt  = self._grund_abgelehnt.toPlainText().strip(),
             bemerkung        = self._bemerkung.toPlainText().strip(),
         )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Word-Protokoll für Patienten-Station
+# ──────────────────────────────────────────────────────────────────────────────
+
+def export_patient_word(
+    patient: dict,
+    verbrauchsmaterial: list[dict],
+    ziel_pfad: str | None = None,
+) -> str:
+    """
+    Erstellt ein Word-Protokoll (.docx) für einen einzelnen Stationspatienten.
+    Gibt den gespeicherten Dateipfad zurück.
+    """
+    try:
+        from docx import Document
+        from docx.shared import Pt, Cm, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+    except ImportError as e:
+        raise ImportError(
+            "python-docx ist nicht installiert. Bitte 'pip install python-docx' ausführen."
+        ) from e
+
+    os.makedirs(_PATIENTEN_PROTO_DIR, exist_ok=True)
+
+    if not ziel_pfad:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        datum_str = patient.get("datum", "").replace(".", "")
+        dateiname = f"Patientenprotokoll_{datum_str}_{ts}.docx"
+        ziel_pfad = os.path.join(_PATIENTEN_PROTO_DIR, dateiname)
+
+    doc = Document()
+
+    # ── Seitenränder ────────────────────────────────────────────────────────
+    for sec in doc.sections:
+        sec.top_margin    = Cm(1.8)
+        sec.bottom_margin = Cm(1.8)
+        sec.left_margin   = Cm(2.0)
+        sec.right_margin  = Cm(2.0)
+
+    DRK_ROT  = RGBColor(0xC8, 0x10, 0x2E)
+    DRK_BLAU = RGBColor(0x15, 0x65, 0xA8)
+
+    def _set_cell_bg(cell, rgb_hex: str):
+        tc   = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        shd  = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), rgb_hex)
+        tcPr.append(shd)
+
+    def _row(label: str, wert):
+        tbl = doc.add_table(rows=1, cols=2)
+        tbl.style = "Table Grid"
+        lc = tbl.rows[0].cells[0]
+        run_l = lc.paragraphs[0].add_run(label)
+        run_l.bold = True
+        run_l.font.size = Pt(9)
+        _set_cell_bg(lc, "E8EFF8")
+        vc = tbl.rows[0].cells[1]
+        wert_str = str(wert).strip() if (wert is not None and str(wert).strip()) else "—"
+        vc.paragraphs[0].add_run(wert_str).font.size = Pt(9)
+
+    def _abschnitt(titel: str):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(8)
+        p.paragraph_format.space_after  = Pt(0)
+        run = p.add_run(f"  {titel}")
+        run.bold = True
+        run.font.size = Pt(10)
+        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        pPr = p._p.get_or_add_pPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), "1565A8")
+        pPr.append(shd)
+
+    # ── Logo ─────────────────────────────────────────────────────────────────
+    logo_pfad = os.path.join(BASE_DIR, "Daten", "Email", "Logo.jpg")
+    if os.path.isfile(logo_pfad):
+        doc.add_picture(logo_pfad, width=Cm(4))
+        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    # ── Titel ─────────────────────────────────────────────────────────────────
+    titel_p = doc.add_heading("Patientenprotokoll", level=1)
+    titel_p.runs[0].font.color.rgb = DRK_ROT
+    titel_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    sub_p = doc.add_paragraph()
+    sub_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    sub_run = sub_p.add_run("DRK Erste-Hilfe-Station – Flughafen Köln/Bonn (FKB)")
+    sub_run.font.size = Pt(10)
+    sub_run.font.color.rgb = DRK_BLAU
+
+    info_p = doc.add_paragraph()
+    info_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    info_p.add_run(
+        f"Datum: {patient.get('datum', '')}  |  Uhrzeit: {patient.get('uhrzeit', '')}  |  "
+        f"Behandlungsdauer: {patient.get('behandlungsdauer', 0) or 0} Min."
+    ).font.size = Pt(9)
+
+    bg_jn = "Ja ⚠" if patient.get("arbeitsunfall") else "Nein"
+    bg_p = doc.add_paragraph()
+    bg_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    bg_run = bg_p.add_run(f"BG-Fall / Arbeitsunfall: {bg_jn}")
+    bg_run.font.size = Pt(9)
+    bg_run.bold = True
+    if patient.get("arbeitsunfall"):
+        bg_run.font.color.rgb = RGBColor(0xB0, 0x00, 0x00)
+
+    # ── 1. Patient ────────────────────────────────────────────────────────────
+    _abschnitt("1 │ Patient")
+    _row("Typ",                    patient.get("patient_typ", ""))
+    _row("Abteilung",              patient.get("patient_abteilung", ""))
+    _row("Name / Anonymisierung",  patient.get("patient_name", ""))
+    _row("Alter",                  patient.get("patient_alter", "") or "")
+    _row("Geschlecht",             patient.get("geschlecht", ""))
+
+    # ── 2. Ereignis ───────────────────────────────────────────────────────────
+    _abschnitt("2 │ Ereignis")
+    _row("Was ist passiert?",    patient.get("hergang_was", ""))
+    _row("Wie ist es passiert?", patient.get("hergang_wie", ""))
+    _row("Ort / Bereich",        patient.get("unfall_ort", ""))
+
+    # ── 3. Beschwerdebild ─────────────────────────────────────────────────────
+    _abschnitt("3 │ Beschwerdebild")
+    _row("Beschwerdeart", patient.get("beschwerde_art", ""))
+    _row("Symptome",      patient.get("symptome", ""))
+
+    # ── 4. ABCDE-Schema ───────────────────────────────────────────────────────
+    _abschnitt("4 │ ABCDE-Schema")
+    _row("A – Airway (Atemweg)",           patient.get("abcde_a", ""))
+    _row("B – Breathing (Atmung)",         patient.get("abcde_b", ""))
+    _row("C – Circulation (Kreislauf)",    patient.get("abcde_c", ""))
+    _row("D – Disability (Neurologie)",    patient.get("abcde_d", ""))
+    _row("E – Exposure (Umgebung/Körper)", patient.get("abcde_e", ""))
+
+    # ── 5. Monitoring ─────────────────────────────────────────────────────────
+    _abschnitt("5 │ Monitoring")
+    mon_tbl = doc.add_table(rows=2, cols=4)
+    mon_tbl.style = "Table Grid"
+    for _i, _h in enumerate(["BZ (mg/dl)", "RR (mmHg)", "SpO2 (%)", "HF (bpm)"]):
+        _c = mon_tbl.rows[0].cells[_i]
+        _rc = _c.paragraphs[0].add_run(_h)
+        _rc.bold = True
+        _rc.font.size = Pt(9)
+        _set_cell_bg(_c, "E8EFF8")
+    for _i, _v in enumerate([
+        patient.get("monitoring_bz",   "") or "—",
+        patient.get("monitoring_rr",   "") or "—",
+        patient.get("monitoring_spo2", "") or "—",
+        patient.get("monitoring_hf",   "") or "—",
+    ]):
+        mon_tbl.rows[1].cells[_i].paragraphs[0].add_run(_v).font.size = Pt(9)
+
+    # ── 6. Vorerkrankungen & Medikamente ──────────────────────────────────────
+    _abschnitt("6 │ Vorerkrankungen & Medikamente des Patienten")
+    _row("Vorerkrankungen",       patient.get("vorerkrankungen", ""))
+    _row("Medikamente (Patient)", patient.get("medikamente_patient", ""))
+
+    # ── 7. Behandlung ─────────────────────────────────────────────────────────
+    _abschnitt("7 │ Behandlung durch DRK")
+    _row("Diagnose / Einweisung", patient.get("diagnose", ""))
+    _row("Maßnahmen",             patient.get("massnahmen", ""))
+    _row("Medikamentengabe",      "Ja" if patient.get("medikamente_gegeben") else "Nein")
+    _row("Medikament(e)",         patient.get("medikamente_gegeben_was", ""))
+
+    # ── 8. Verbrauchsmaterial ─────────────────────────────────────────────────
+    _abschnitt("8 │ Verbrauchsmaterial")
+    if verbrauchsmaterial:
+        vm_tbl = doc.add_table(rows=1 + len(verbrauchsmaterial), cols=3)
+        vm_tbl.style = "Table Grid"
+        for _i, _h in enumerate(["Material", "Menge", "Einheit"]):
+            _c2 = vm_tbl.rows[0].cells[_i]
+            _rc2 = _c2.paragraphs[0].add_run(_h)
+            _rc2.bold = True
+            _rc2.font.size = Pt(9)
+            _set_cell_bg(_c2, "E8EFF8")
+        for _ri, _m in enumerate(verbrauchsmaterial, start=1):
+            vm_tbl.rows[_ri].cells[0].paragraphs[0].add_run(_m.get("material", "")).font.size = Pt(9)
+            vm_tbl.rows[_ri].cells[1].paragraphs[0].add_run(str(_m.get("menge", ""))).font.size = Pt(9)
+            vm_tbl.rows[_ri].cells[2].paragraphs[0].add_run(_m.get("einheit", "")).font.size = Pt(9)
+    else:
+        p_vm = doc.add_paragraph("Kein Verbrauchsmaterial erfasst.")
+        p_vm.runs[0].font.size = Pt(9)
+
+    # ── 9. Arbeitsunfall / BG-Fall ────────────────────────────────────────────
+    if patient.get("arbeitsunfall"):
+        _abschnitt("9 │ Arbeitsunfall / BG-Fall")
+        _row("Details / Hergang", patient.get("arbeitsunfall_details", ""))
+
+    # ── 10. Personal & Abschluss ──────────────────────────────────────────────
+    _abschnitt("10 │ Personal & Abschluss")
+    _row("DRK MA 1",          patient.get("drk_ma1", ""))
+    _row("DRK MA 2",          patient.get("drk_ma2", ""))
+    _row("Weitergeleitet an", patient.get("weitergeleitet", ""))
+
+    # ── 11. Bemerkung ─────────────────────────────────────────────────────────
+    if patient.get("bemerkung", "").strip():
+        _abschnitt("11 │ Bemerkung")
+        _row("Bemerkung", patient.get("bemerkung", ""))
+
+    # ── Fußzeile ──────────────────────────────────────────────────────────────
+    doc.add_paragraph()
+    fuss_p = doc.add_paragraph()
+    fuss_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    fuss_r = fuss_p.add_run(
+        f"Erstellt am {datetime.now().strftime('%d.%m.%Y %H:%M')}  –  "
+        "DRK-Kreisverband Köln e.V. | Erste-Hilfe-Station FKB"
+    )
+    fuss_r.font.size = Pt(8)
+    fuss_r.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+    doc.save(ziel_pfad)
+    return ziel_pfad
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Dialog: Patient erfassen / bearbeiten
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _PatientenDialog(QDialog):
+    """Erweitertes Formular zum Erfassen / Bearbeiten eines Stationspatienten."""
+
+    _FIELD_STYLE = (
+        "QLineEdit, QTextEdit, QTimeEdit, QDateEdit, QSpinBox, QComboBox {"
+        "border:1px solid #ccc; border-radius:4px; padding:4px;"
+        "font-size:12px; background:white;}"
+    )
+    _GROUP_STYLE = (
+        "QGroupBox { font-weight:bold; font-size:12px; color:#1565a8;"
+        "border:1px solid #c5d8f0; border-radius:6px;"
+        "margin-top:6px; padding-top:10px; background:#f8fbff;}"
+        "QGroupBox::title { subcontrol-origin:margin; left:12px;"
+        "padding:0 4px; background:#f8fbff;}"
+    )
+    _DISABLED_STYLE = (
+        "QLineEdit{border:1px solid #ddd;border-radius:4px;padding:4px;"
+        "font-size:12px;background:#f5f5f5;color:#aaa;}"
+    )
+    _PATIENT_TYPEN = [
+        "Fluggast", "Mitarbeiter (intern)", "Besucher",
+        "Handwerker / Dienstleister", "Sonstiges",
+    ]
+    _BESCHWERDE_ARTEN = [
+        "", "Verletzung / Trauma", "Internistisch / Erkrankung",
+        "Neurologisch", "Allergisch / Anaphylaxie",
+        "Bewusstlosigkeit / Synkope", "Kreislaufprobleme",
+        "Atemnot / Respiratorisch", "Psychisch / Psychiatrisch", "Sonstiges",
+    ]
+
+    def __init__(self, daten: dict | None = None, parent=None):
+        super().__init__(parent)
+        self._edit_daten = daten
+        self._verbrauchsmaterial_liste: list[dict] = []
+        self.setWindowTitle(
+            "✏️  Patient bearbeiten" if daten
+            else "🏥  Patienten erfassen – DRK Station"
+        )
+        self.setMinimumWidth(680)
+        self.setMinimumHeight(750)
+        self.resize(740, 880)
+        self._build_ui()
+        if daten:
+            self._befuellen(daten)
+
+    # ── UI-Aufbau ──────────────────────────────────────────────────────────────────────
+    def _build_ui(self):
+        main = QVBoxLayout(self)
+        main.setContentsMargins(12, 12, 12, 8)
+        main.setSpacing(8)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea{border:none;}")
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setSpacing(10)
+        layout.setContentsMargins(4, 4, 4, 4)
+        scroll.setWidget(container)
+        main.addWidget(scroll, 1)
+
+        layout.addWidget(self._build_grp_zeit())
+        layout.addWidget(self._build_grp_patient())
+        layout.addWidget(self._build_grp_ereignis())
+        layout.addWidget(self._build_grp_beschwerde())
+        layout.addWidget(self._build_grp_abcde())
+        layout.addWidget(self._build_grp_monitoring())
+        layout.addWidget(self._build_grp_vorerkrankungen())
+        layout.addWidget(self._build_grp_behandlung())
+        layout.addWidget(self._build_grp_material())
+        layout.addWidget(self._build_grp_arbeitsunfall())
+        layout.addWidget(self._build_grp_personal())
+        layout.addWidget(self._build_grp_bemerkung())
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self._validate)
+        btns.rejected.connect(self.reject)
+        main.addWidget(btns)
+
+    # ── Hilfsmethoden ────────────────────────────────────────────────────────────────────
+    def _grp(self, titel: str) -> tuple[QGroupBox, QFormLayout]:
+        g = QGroupBox(titel)
+        g.setStyleSheet(self._GROUP_STYLE)
+        f = QFormLayout(g)
+        f.setSpacing(8)
+        return g, f
+
+    def _le(self, placeholder: str = "") -> QLineEdit:
+        w = QLineEdit()
+        w.setPlaceholderText(placeholder)
+        w.setStyleSheet(self._FIELD_STYLE)
+        return w
+
+    def _te(self, placeholder: str = "", h: int = 65) -> QTextEdit:
+        w = QTextEdit()
+        w.setPlaceholderText(placeholder)
+        w.setFixedHeight(h)
+        w.setStyleSheet(self._FIELD_STYLE)
+        return w
+
+    # ── Abschnitte ───────────────────────────────────────────────────────────────────
+    def _build_grp_zeit(self) -> QGroupBox:
+        g, f = self._grp("⏱️  Zeitangaben")
+        self._datum = QDateEdit()
+        self._datum.setCalendarPopup(True)
+        self._datum.setDisplayFormat("dd.MM.yyyy")
+        self._datum.setDate(QDate.currentDate())
+        self._datum.setStyleSheet(self._FIELD_STYLE)
+        f.addRow("Datum:", self._datum)
+        self._uhrzeit = QTimeEdit()
+        self._uhrzeit.setDisplayFormat("HH:mm")
+        self._uhrzeit.setTime(QTime.currentTime())
+        self._uhrzeit.setStyleSheet(self._FIELD_STYLE)
+        f.addRow("Uhrzeit:", self._uhrzeit)
+        self._behandlungsdauer = QSpinBox()
+        self._behandlungsdauer.setRange(0, 999)
+        self._behandlungsdauer.setSuffix("  min")
+        self._behandlungsdauer.setValue(0)
+        self._behandlungsdauer.setStyleSheet(self._FIELD_STYLE)
+        f.addRow("Behandlungsdauer:", self._behandlungsdauer)
+        return g
+
+    def _build_grp_patient(self) -> QGroupBox:
+        g, f = self._grp("👤  Patienteninformationen")
+        self._patient_typ = QComboBox()
+        self._patient_typ.addItems(self._PATIENT_TYPEN)
+        self._patient_typ.setEditable(True)
+        self._patient_typ.setStyleSheet(self._FIELD_STYLE)
+        self._patient_typ.currentTextChanged.connect(self._on_typ_changed)
+        f.addRow("Personentyp *:", self._patient_typ)
+        self._patient_abteilung = self._le("Abteilung / Firma / Bereich")
+        self._patient_abteilung.setEnabled(False)
+        self._patient_abteilung.setStyleSheet(self._DISABLED_STYLE)
+        f.addRow("Abteilung:", self._patient_abteilung)
+        self._patient_name = self._le("Optional / Anonymisiert  z.B. 'Passagier A'")
+        f.addRow("Name / ID:", self._patient_name)
+        self._alter = QSpinBox()
+        self._alter.setRange(0, 150)
+        self._alter.setSuffix("  Jahre")
+        self._alter.setValue(0)
+        self._alter.setStyleSheet(self._FIELD_STYLE)
+        f.addRow("Alter:", self._alter)
+        self._geschlecht = QComboBox()
+        self._geschlecht.addItems(["", "männlich", "weiblich", "divers"])
+        self._geschlecht.setStyleSheet(self._FIELD_STYLE)
+        f.addRow("Geschlecht:", self._geschlecht)
+        return g
+
+    def _on_typ_changed(self, text: str):
+        is_intern = "mitarbeiter" in text.lower() or "intern" in text.lower()
+        self._patient_abteilung.setEnabled(is_intern)
+        self._patient_abteilung.setStyleSheet(
+            self._FIELD_STYLE if is_intern else self._DISABLED_STYLE
+        )
+
+    def _build_grp_ereignis(self) -> QGroupBox:
+        g, f = self._grp("📋  Ereignis")
+        self._hergang_was = self._te(
+            "Was ist passiert? (Beschreibung des Ereignisses)", 70
+        )
+        f.addRow("Was ist passiert *:", self._hergang_was)
+        self._hergang_wie = self._te(
+            "Wie ist es passiert? (Unfallhergang, Entstehungsweise)", 60
+        )
+        f.addRow("Wie ist es passiert:", self._hergang_wie)
+        self._unfall_ort = self._le(
+            "z.B. Terminal 1 / Gate B42 / Gepäckband 7 / Außenbereich …"
+        )
+        f.addRow("Wo ist es passiert:", self._unfall_ort)
+        return g
+
+    def _build_grp_beschwerde(self) -> QGroupBox:
+        g, f = self._grp("🩺  Beschwerdebild / Verletzung")
+        self._beschwerde_art = QComboBox()
+        self._beschwerde_art.addItems(self._BESCHWERDE_ARTEN)
+        self._beschwerde_art.setEditable(True)
+        self._beschwerde_art.setStyleSheet(self._FIELD_STYLE)
+        f.addRow("Art der Beschwerde:", self._beschwerde_art)
+        self._symptome = self._te("Symptome, Beschwerden und Befunde …")
+        f.addRow("Symptome / Befunde:", self._symptome)
+        return g
+
+    def _build_grp_abcde(self) -> QGroupBox:
+        g = QGroupBox("🔬  ABCDE-Schema (Notfallsystematik Rettungsdienst)")
+        g.setStyleSheet(self._GROUP_STYLE)
+        grid = QGridLayout(g)
+        grid.setSpacing(6)
+        grid.setContentsMargins(10, 18, 10, 10)
+        for col, txt in [(1, "Kriterium"), (2, "Befund / Beurteilung")]:
+            lbl = QLabel(txt)
+            lbl.setStyleSheet("font-weight:bold; font-size:11px; color:#555;")
+            grid.addWidget(lbl, 0, col)
+        abcde_defs = [
+            ("A", "Airway – Atemweg",        "frei / verlegt / Stridor / Fremdkörper …",           "_abcde_a"),
+            ("B", "Breathing – Atmung",       "unauffällig / Tachypnoe / Dyspnoe / SpO₂ …",    "_abcde_b"),
+            ("C", "Circulation – Kreislauf",  "Puls tastbar / RR … / Tachykardie / Schock …",     "_abcde_c"),
+            ("D", "Disability – Neurologie",  "wach / GCS … / orientiert / Pupillen … / AVPU …", "_abcde_d"),
+            ("E", "Exposure – Untersuchung",  "Wunden / Traumazeichen / Hypothermie / Hautturgur …",   "_abcde_e"),
+        ]
+        for r, (letter, label_txt, placeholder, attr) in enumerate(abcde_defs, start=1):
+            badge = QLabel(letter)
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            badge.setFixedSize(26, 26)
+            badge.setStyleSheet(
+                "background:#1565a8;color:white;border-radius:13px;"
+                "font-weight:bold;font-size:13px;"
+            )
+            lbl = QLabel(label_txt)
+            lbl.setStyleSheet("font-size:11px;")
+            edit = self._le(placeholder)
+            setattr(self, attr, edit)
+            grid.addWidget(badge, r, 0)
+            grid.addWidget(lbl,   r, 1)
+            grid.addWidget(edit,  r, 2)
+        grid.setColumnStretch(2, 1)
+        return g
+
+    def _build_grp_monitoring(self) -> QGroupBox:
+        g = QGroupBox("📊  Monitoring-Werte")
+        g.setStyleSheet(self._GROUP_STYLE)
+        grid = QGridLayout(g)
+        grid.setSpacing(8)
+        grid.setContentsMargins(10, 18, 10, 10)
+        mon_defs = [
+            ("BZ (mg/dl):", "_mon_bz",   "z.B. 95"),
+            ("RR (mmHg):",  "_mon_rr",   "z.B. 120/80"),
+            ("SpO₂ (%):",  "_mon_spo2", "z.B. 98"),
+            ("HF (bpm):",   "_mon_hf",   "z.B. 78"),
+        ]
+        for i, (label, attr, placeholder) in enumerate(mon_defs):
+            r, c = divmod(i, 2)
+            lbl = QLabel(label)
+            lbl.setStyleSheet("font-size:12px;")
+            edit = self._le(placeholder)
+            edit.setFixedWidth(140)
+            setattr(self, attr, edit)
+            grid.addWidget(lbl,  r, c * 2)
+            grid.addWidget(edit, r, c * 2 + 1)
+        return g
+
+    def _build_grp_vorerkrankungen(self) -> QGroupBox:
+        g, f = self._grp("📜  Vorerkrankungen & Medikamente des Patienten")
+        self._vorerkrankungen = self._te(
+            "Bekannte Vorerkrankungen, Allergien …", 60
+        )
+        f.addRow("Vorerkrankungen:", self._vorerkrankungen)
+        self._medikamente_patient = self._te(
+            "Dauermedikamente des Patienten …", 55
+        )
+        f.addRow("Medikamente (Patient):", self._medikamente_patient)
+        return g
+
+    def _build_grp_behandlung(self) -> QGroupBox:
+        g, f = self._grp("🏥  Art und Umfang der Behandlung")
+        self._massnahmen = self._te(
+            "Art und Umfang der durchgeführten Maßnahmen …", 80
+        )
+        f.addRow("Maßnahmen / Behandlung *:", self._massnahmen)
+        self._diagnose = self._te("Diagnose / Verdachtsdiagnose …", 55)
+        f.addRow("Diagnose:", self._diagnose)
+        med_w = QWidget()
+        med_l = QHBoxLayout(med_w)
+        med_l.setContentsMargins(0, 0, 0, 0)
+        self._medikamente_cb = QCheckBox("Medikamente verabreicht")
+        self._medikamente_cb.setStyleSheet("font-size:12px;")
+        self._medikamente_gegeben_was = self._le("welche Medikamente / Dosis …")
+        self._medikamente_gegeben_was.setEnabled(False)
+        self._medikamente_cb.toggled.connect(self._medikamente_gegeben_was.setEnabled)
+        med_l.addWidget(self._medikamente_cb)
+        med_l.addWidget(self._medikamente_gegeben_was, 1)
+        f.addRow("Medikamentengabe:", med_w)
+        return g
+
+    def _build_grp_material(self) -> QGroupBox:
+        g = QGroupBox("📦  Verbrauchsmaterial")
+        g.setStyleSheet(self._GROUP_STYLE)
+        mat_layout = QVBoxLayout(g)
+        mat_layout.setSpacing(8)
+        btn_add = QPushButton("➕  Material hinzufügen")
+        btn_add.setFixedHeight(32)
+        btn_add.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_add.setStyleSheet(
+            "QPushButton{background:#107e3e;color:white;border:none;"
+            "border-radius:4px;padding:4px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#0a5c2e;}"
+        )
+        btn_add.clicked.connect(self._material_hinzufuegen)
+        mat_layout.addWidget(btn_add, 0, Qt.AlignmentFlag.AlignLeft)
+        self._material_table = QTableWidget()
+        self._material_table.setColumnCount(4)
+        self._material_table.setHorizontalHeaderLabels(["Material", "Menge", "Einheit", ""])
+        hh = self._material_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self._material_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._material_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._material_table.setMaximumHeight(150)
+        self._material_table.verticalHeader().setVisible(False)
+        self._material_table.setStyleSheet("font-size:12px;")
+        mat_layout.addWidget(self._material_table)
+        return g
+
+    def _build_grp_arbeitsunfall(self) -> QGroupBox:
+        g = QGroupBox("⚠️  Arbeitsunfall / Berufsgenossenschaft")
+        g.setStyleSheet(self._GROUP_STYLE)
+        lay = QVBoxLayout(g)
+        lay.setSpacing(8)
+        self._arbeitsunfall_cb = QCheckBox(
+            "Es handelt sich um einen Arbeitsunfall im Sinne der BG"
+        )
+        self._arbeitsunfall_cb.setStyleSheet(
+            "QCheckBox{font-size:12px;font-weight:bold;color:#b00000;}"
+        )
+        lay.addWidget(self._arbeitsunfall_cb)
+        fl = QFormLayout()
+        self._arbeitsunfall_details = self._le(
+            "Arbeitgeber / BG / Detailangaben zum Arbeitsunfall …"
+        )
+        self._arbeitsunfall_details.setEnabled(False)
+        self._arbeitsunfall_cb.toggled.connect(self._arbeitsunfall_details.setEnabled)
+        fl.addRow("Details (BG / Arbeitgeber):", self._arbeitsunfall_details)
+        lay.addLayout(fl)
+        return g
+
+    def _build_grp_personal(self) -> QGroupBox:
+        g, f = self._grp("👥  Personal & Weiterleitung")
+        self._drk_ma1 = self._le("Name Mitarbeiter 1")
+        f.addRow("DRK MA 1 *:", self._drk_ma1)
+        self._drk_ma2 = self._le("Name Mitarbeiter 2 (optional)")
+        f.addRow("DRK MA 2:", self._drk_ma2)
+        self._weitergeleitet = self._le(
+            "z.B. 'Krankenhaus XY', 'Hausarzt', '112 gerufen', 'keine' …"
+        )
+        f.addRow("Weitergeleitet an:", self._weitergeleitet)
+        return g
+
+    def _build_grp_bemerkung(self) -> QGroupBox:
+        g = QGroupBox("📝  Bemerkung")
+        g.setStyleSheet(self._GROUP_STYLE)
+        lay = QVBoxLayout(g)
+        self._bemerkung = self._te("Zusätzliche Hinweise …", 55)
+        lay.addWidget(self._bemerkung)
+        return g
+
+    # ── Verbrauchsmaterial ──────────────────────────────────────────────────────────────────
+    def _material_hinzufuegen(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Material hinzufügen")
+        dlg.setMinimumWidth(400)
+        layout = QVBoxLayout(dlg)
+        fl = QFormLayout()
+        material_edit = QLineEdit()
+        material_edit.setPlaceholderText("z.B. Pflaster, Kompresse, Handschuhe …")
+        menge_spin = QSpinBox()
+        menge_spin.setRange(1, 999)
+        menge_spin.setValue(1)
+        einheit_combo = QComboBox()
+        einheit_combo.addItems(["Stk", "Paar", "Pkg", "ml"])
+        einheit_combo.setEditable(True)
+        fl.addRow("Material:", material_edit)
+        fl.addRow("Menge:", menge_spin)
+        fl.addRow("Einheit:", einheit_combo)
+        layout.addLayout(fl)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(lambda: dlg.accept() if material_edit.text().strip() else None)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            material = material_edit.text().strip()
+            if material:
+                self._verbrauchsmaterial_liste.append({
+                    "material": material,
+                    "menge": menge_spin.value(),
+                    "einheit": einheit_combo.currentText()
+                })
+                self._aktualisiere_material_tabelle()
+
+    def _aktualisiere_material_tabelle(self):
+        self._material_table.setRowCount(len(self._verbrauchsmaterial_liste))
+        for row, mat in enumerate(self._verbrauchsmaterial_liste):
+            self._material_table.setItem(row, 0, QTableWidgetItem(mat["material"]))
+            self._material_table.setItem(row, 1, QTableWidgetItem(str(mat["menge"])))
+            self._material_table.setItem(row, 2, QTableWidgetItem(mat["einheit"]))
+            btn_del = QPushButton("🗑")
+            btn_del.setFixedSize(28, 28)
+            btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_del.setStyleSheet(
+                "QPushButton{background:#ffcccc;border:none;border-radius:3px;}"
+                "QPushButton:hover{background:#ff9999;}"
+            )
+            btn_del.clicked.connect(lambda checked, r=row: self._material_entfernen(r))
+            self._material_table.setCellWidget(row, 3, btn_del)
+
+    def _material_entfernen(self, row: int):
+        if 0 <= row < len(self._verbrauchsmaterial_liste):
+            self._verbrauchsmaterial_liste.pop(row)
+            self._aktualisiere_material_tabelle()
+
+    # ── Daten befüllen ───────────────────────────────────────────────────────────────────────
+    def _befuellen(self, d: dict):
+        try:
+            datum_obj = QDate.fromString(d.get("datum", ""), "dd.MM.yyyy")
+            if datum_obj.isValid():
+                self._datum.setDate(datum_obj)
+        except Exception:
+            pass
+        try:
+            zeit_obj = QTime.fromString(d.get("uhrzeit", ""), "HH:mm")
+            if zeit_obj.isValid():
+                self._uhrzeit.setTime(zeit_obj)
+        except Exception:
+            pass
+        self._behandlungsdauer.setValue(d.get("behandlungsdauer", 0) or 0)
+        # Patient
+        typ = d.get("patient_typ", "")
+        if typ:
+            idx = self._patient_typ.findText(typ)
+            if idx >= 0:
+                self._patient_typ.setCurrentIndex(idx)
+            else:
+                self._patient_typ.setCurrentText(typ)
+        self._patient_abteilung.setText(d.get("patient_abteilung", ""))
+        self._on_typ_changed(self._patient_typ.currentText())
+        self._patient_name.setText(d.get("patient_name", ""))
+        self._alter.setValue(d.get("patient_alter", 0) or 0)
+        idx = self._geschlecht.findText(d.get("geschlecht", ""))
+        if idx >= 0:
+            self._geschlecht.setCurrentIndex(idx)
+        # Ereignis
+        self._hergang_was.setPlainText(d.get("hergang_was", ""))
+        self._hergang_wie.setPlainText(d.get("hergang_wie", ""))
+        self._unfall_ort.setText(d.get("unfall_ort", ""))
+        # Beschwerdebild
+        ba = d.get("beschwerde_art", "")
+        if ba:
+            idx2 = self._beschwerde_art.findText(ba)
+            if idx2 >= 0:
+                self._beschwerde_art.setCurrentIndex(idx2)
+            else:
+                self._beschwerde_art.setCurrentText(ba)
+        self._symptome.setPlainText(d.get("symptome", ""))
+        # ABCDE
+        self._abcde_a.setText(d.get("abcde_a", ""))
+        self._abcde_b.setText(d.get("abcde_b", ""))
+        self._abcde_c.setText(d.get("abcde_c", ""))
+        self._abcde_d.setText(d.get("abcde_d", ""))
+        self._abcde_e.setText(d.get("abcde_e", ""))
+        # Monitoring
+        self._mon_bz.setText(d.get("monitoring_bz", ""))
+        self._mon_rr.setText(d.get("monitoring_rr", ""))
+        self._mon_spo2.setText(d.get("monitoring_spo2", ""))
+        self._mon_hf.setText(d.get("monitoring_hf", ""))
+        # Vorerkrankungen
+        self._vorerkrankungen.setPlainText(d.get("vorerkrankungen", ""))
+        self._medikamente_patient.setPlainText(d.get("medikamente_patient", ""))
+        # Behandlung
+        self._massnahmen.setPlainText(d.get("massnahmen", ""))
+        self._diagnose.setPlainText(d.get("diagnose", ""))
+        med_geg = bool(d.get("medikamente_gegeben", 0))
+        self._medikamente_cb.setChecked(med_geg)
+        self._medikamente_gegeben_was.setText(d.get("medikamente_gegeben_was", ""))
+        # Arbeitsunfall
+        self._arbeitsunfall_cb.setChecked(bool(d.get("arbeitsunfall", 0)))
+        self._arbeitsunfall_details.setText(d.get("arbeitsunfall_details", ""))
+        # Personal
+        self._drk_ma1.setText(d.get("drk_ma1", ""))
+        self._drk_ma2.setText(d.get("drk_ma2", ""))
+        self._weitergeleitet.setText(d.get("weitergeleitet", ""))
+        self._bemerkung.setPlainText(d.get("bemerkung", ""))
+        # Verbrauchsmaterial
+        if "id" in d:
+            self._verbrauchsmaterial_liste = lade_verbrauchsmaterial(d["id"])
+            self._aktualisiere_material_tabelle()
+
+    # ── Validierung ─────────────────────────────────────────────────────────────────────────
+    def _validate(self):
+        if not self._hergang_was.toPlainText().strip():
+            QMessageBox.warning(self, "Pflichtfeld", "Bitte 'Was ist passiert?' ausfüllen.")
+            return
+        if not self._massnahmen.toPlainText().strip():
+            QMessageBox.warning(
+                self, "Pflichtfeld", "Bitte Art und Umfang der Behandlung ausfüllen."
+            )
+            return
+        if not self._drk_ma1.text().strip():
+            QMessageBox.warning(self, "Pflichtfeld", "Bitte mindestens DRK MA 1 angeben.")
+            return
+        self.accept()
+
+    # ── Daten auslesen ──────────────────────────────────────────────────────────────────────
+    def get_data(self) -> tuple[dict, list[dict]]:
+        daten = {
+            "datum":                   self._datum.date().toString("dd.MM.yyyy"),
+            "uhrzeit":                 self._uhrzeit.time().toString("HH:mm"),
+            "behandlungsdauer":        self._behandlungsdauer.value(),
+            "patient_typ":             self._patient_typ.currentText(),
+            "patient_abteilung":       self._patient_abteilung.text().strip(),
+            "patient_name":            self._patient_name.text().strip(),
+            "patient_alter":           self._alter.value(),
+            "geschlecht":              self._geschlecht.currentText(),
+            "hergang_was":             self._hergang_was.toPlainText().strip(),
+            "hergang_wie":             self._hergang_wie.toPlainText().strip(),
+            "unfall_ort":              self._unfall_ort.text().strip(),
+            "beschwerde_art":          self._beschwerde_art.currentText(),
+            "symptome":                self._symptome.toPlainText().strip(),
+            "abcde_a":                 self._abcde_a.text().strip(),
+            "abcde_b":                 self._abcde_b.text().strip(),
+            "abcde_c":                 self._abcde_c.text().strip(),
+            "abcde_d":                 self._abcde_d.text().strip(),
+            "abcde_e":                 self._abcde_e.text().strip(),
+            "monitoring_bz":           self._mon_bz.text().strip(),
+            "monitoring_rr":           self._mon_rr.text().strip(),
+            "monitoring_spo2":         self._mon_spo2.text().strip(),
+            "monitoring_hf":           self._mon_hf.text().strip(),
+            "vorerkrankungen":         self._vorerkrankungen.toPlainText().strip(),
+            "medikamente_patient":     self._medikamente_patient.toPlainText().strip(),
+            "massnahmen":              self._massnahmen.toPlainText().strip(),
+            "diagnose":                self._diagnose.toPlainText().strip(),
+            "medikamente_gegeben":     1 if self._medikamente_cb.isChecked() else 0,
+            "medikamente_gegeben_was": self._medikamente_gegeben_was.text().strip(),
+            "arbeitsunfall":           1 if self._arbeitsunfall_cb.isChecked() else 0,
+            "arbeitsunfall_details":   self._arbeitsunfall_details.text().strip(),
+            "drk_ma1":                 self._drk_ma1.text().strip(),
+            "drk_ma2":                 self._drk_ma2.text().strip(),
+            "weitergeleitet":          self._weitergeleitet.text().strip(),
+            "bemerkung":               self._bemerkung.toPlainText().strip(),
+        }
+        return daten, self._verbrauchsmaterial_liste
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Mail-Dialog für Patienten-Protokoll
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _PatientenMailDialog(QDialog):
+    """Mail-Dialog für ein einzelnes Patienten-Protokoll (.docx)."""
+
+    _FIELD_STYLE = (
+        "QLineEdit, QTextEdit { border:1px solid #ccc; border-radius:4px;"
+        "padding:4px; font-size:12px; background:white;}"
+    )
+
+    def __init__(
+        self,
+        word_pfad: str,
+        patient_name: str,
+        datum: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("📧  Patientenprotokoll per E-Mail senden")
+        self.setMinimumWidth(500)
+        self.resize(540, 420)
+        layout = QVBoxLayout(self)
+        fl = QFormLayout()
+        fl.setSpacing(8)
+
+        self._empfaenger = QLineEdit()
+        self._empfaenger.setPlaceholderText("empfaenger@drk-koeln.de")
+        self._empfaenger.setStyleSheet(self._FIELD_STYLE)
+        fl.addRow("Empfänger:", self._empfaenger)
+
+        self._betreff = QLineEdit()
+        pat_lbl = patient_name.strip() if patient_name.strip() else "Patient"
+        self._betreff.setText(f"Patientenprotokoll FKB – {pat_lbl} ({datum})")
+        self._betreff.setStyleSheet(self._FIELD_STYLE)
+        fl.addRow("Betreff:", self._betreff)
+
+        layout.addLayout(fl)
+        layout.addWidget(QLabel("Nachrichtentext:"))
+
+        self._body = QTextEdit()
+        self._body.setStyleSheet(self._FIELD_STYLE)
+        self._body.setPlainText(
+            f"Hallo,\n\n"
+            f"anbei das Patientenprotokoll vom {datum}."
+            f"{(' (Patient: ' + patient_name.strip() + ')') if patient_name.strip() else ''}\n\n"
+            f"Das Protokoll ist als Word-Dokument angehängt.\n\n"
+            f"Mit freundlichen Grüßen\n"
+            f"DRK-Kreisverband Köln e.V."
+        )
+        self._body.setMinimumHeight(140)
+        layout.addWidget(self._body, 1)
+
+        anhang_lbl = QLabel(f"📎  Anhang: {os.path.basename(word_pfad)}")
+        anhang_lbl.setStyleSheet(
+            "background:#e3f2fd; color:#154360; border-radius:4px;"
+            "padding:6px 10px; font-size:11px;"
+        )
+        layout.addWidget(anhang_lbl)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("📧  Outlook-Entwurf öffnen")
+        btns.accepted.connect(self._on_accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+    def _on_accept(self):
+        if not self._empfaenger.text().strip():
+            QMessageBox.warning(self, "Pflichtfeld", "Bitte einen Empfänger angeben.")
+            return
+        self.accept()
+
+    def get_daten(self) -> tuple[str, str, str]:
+        return (
+            self._empfaenger.text().strip(),
+            self._betreff.text().strip(),
+            self._body.toPlainText().strip(),
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Patienten DRK Station Tab
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _PatientenTab(QWidget):
+    """Tab 'Patienten DRK Station' – Behandlung von Patienten auf der Station."""
+
+    _COLS = [
+        "Nr.", "Datum", "Uhrzeit", "Dauer\n(min)",
+        "Typ", "Patient", "Alter", "Beschwerde",
+        "Ort", "Maßnahmen", "DRK MA 1", "Weitergeleitet", "BG-Fall",
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._eintraege: list[dict] = []
+        self._build_ui()
+        self.refresh()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
+
+        titel_lbl = QLabel("🏥  Patienten DRK Station")
+        titel_lbl.setFont(QFont("Arial", 15, QFont.Weight.Bold))
+        titel_lbl.setStyleSheet(f"color:{FIORI_TEXT}; padding: 4px 0;")
+        layout.addWidget(titel_lbl)
+
+        hinweis_lbl = QLabel("Behandlung von Patienten direkt auf der DRK-Station am Flughafen")
+        hinweis_lbl.setStyleSheet("color:#666; font-size:11px; font-style:italic;")
+        layout.addWidget(hinweis_lbl)
+
+        # ── Filter-Leiste ─────────────────────────────────────────────────
+        filter_frame = QFrame()
+        filter_frame.setStyleSheet(
+            "QFrame{background:#f8f9fa;border:1px solid #ddd;border-radius:4px;padding:4px;}"
+        )
+        fl = QHBoxLayout(filter_frame)
+        fl.setContentsMargins(8, 6, 8, 6)
+        fl.setSpacing(10)
+
+        fl.addWidget(QLabel("Jahr:"))
+        self._combo_jahr = QComboBox()
+        self._combo_jahr.setFixedWidth(80)
+        self._combo_jahr.addItem("Alle", None)
+        self._combo_jahr.currentIndexChanged.connect(self._filter_changed)
+        fl.addWidget(self._combo_jahr)
+
+        fl.addWidget(QLabel("Monat:"))
+        self._combo_monat = QComboBox()
+        self._combo_monat.setFixedWidth(110)
+        for i, m in enumerate([
+            "Alle", "Januar", "Februar", "März", "April", "Mai", "Juni",
+            "Juli", "August", "September", "Oktober", "November", "Dezember"
+        ]):
+            self._combo_monat.addItem(m, None if i == 0 else i)
+        self._combo_monat.currentIndexChanged.connect(self._filter_changed)
+        fl.addWidget(self._combo_monat)
+
+        fl.addWidget(QLabel("Suche:"))
+        self._suche = QLineEdit()
+        self._suche.setPlaceholderText("Patient, Symptome, Mitarbeiter …")
+        self._suche.setMinimumWidth(200)
+        self._suche.textChanged.connect(self._filter_changed)
+        fl.addWidget(self._suche, 1)
+
+        btn_reset = _btn_light("✖ Zurücksetzen")
+        btn_reset.setFixedHeight(28)
+        btn_reset.clicked.connect(self._filter_reset)
+        fl.addWidget(btn_reset)
+        layout.addWidget(filter_frame)
+
+        # ── Aktions-Buttons ────────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        self._btn_neu = _btn("＋  Neuer Patient", "#107e3e", "#0a5c2e")
+        self._btn_neu.setToolTip("Neuen Patienten erfassen")
+        self._btn_neu.clicked.connect(self._neu)
+        btn_row.addWidget(self._btn_neu)
+
+        self._btn_bearbeiten = _btn_light("✏  Bearbeiten")
+        self._btn_bearbeiten.setEnabled(False)
+        self._btn_bearbeiten.setToolTip("Ausgewählten Patienten bearbeiten")
+        self._btn_bearbeiten.clicked.connect(self._bearbeiten)
+        btn_row.addWidget(self._btn_bearbeiten)
+
+        self._btn_loeschen = _btn_light("🗑  Löschen")
+        self._btn_loeschen.setEnabled(False)
+        self._btn_loeschen.setStyleSheet(
+            "QPushButton{background:#eee;color:#333;border:none;"
+            "border-radius:4px;padding:4px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#ffcccc;color:#a00;}"
+            "QPushButton:disabled{background:#f5f5f5;color:#bbb;}"
+        )
+        self._btn_loeschen.clicked.connect(self._loeschen)
+        btn_row.addWidget(self._btn_loeschen)
+
+        self._btn_material = _btn_light("📦  Verbrauchsmaterial anzeigen")
+        self._btn_material.setEnabled(False)
+        self._btn_material.setToolTip("Verbrauchsmaterial für ausgewählten Patienten anzeigen")
+        self._btn_material.clicked.connect(self._material_anzeigen)
+        btn_row.addWidget(self._btn_material)
+
+        self._btn_word = _btn_light("📄  Word-Protokoll")
+        self._btn_word.setEnabled(False)
+        self._btn_word.setToolTip("Protokoll des ausgewählten Patienten als Word-Datei erstellen und öffnen")
+        self._btn_word.clicked.connect(self._word_protokoll)
+        btn_row.addWidget(self._btn_word)
+
+        self._btn_mail = _btn("📧  Per E-Mail senden", "#6a1b9a", "#4a148c")
+        self._btn_mail.setEnabled(False)
+        self._btn_mail.setToolTip("Word-Protokoll erstellen und als Outlook-Entwurf versenden")
+        self._btn_mail.clicked.connect(self._mail_protokoll)
+        btn_row.addWidget(self._btn_mail)
+
+        btn_row.addStretch()
+        self._treffer_lbl = QLabel()
+        self._treffer_lbl.setStyleSheet("color:#666; font-size:11px;")
+        btn_row.addWidget(self._treffer_lbl)
+        layout.addLayout(btn_row)
+
+        # ── Tabelle ────────────────────────────────────────────────────────
+        self._table = QTableWidget()
+        self._table.setColumnCount(len(self._COLS))
+        self._table.setHorizontalHeaderLabels(self._COLS)
+        hh = self._table.horizontalHeader()
+        for _c in (0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12):
+            hh.setSectionResizeMode(_c, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(7,  QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(9,  QHeaderView.ResizeMode.Stretch)
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setAlternatingRowColors(True)
+        self._table.setStyleSheet(
+            "QTableWidget{border:1px solid #ddd; font-size:12px;}"
+            "QTableWidget::item:selected{background:#d0e4f8; color:#000;}"
+        )
+        self._table.verticalHeader().setVisible(False)
+        self._table.itemSelectionChanged.connect(self._auswahl_geaendert)
+        self._table.itemDoubleClicked.connect(lambda _: self._bearbeiten())
+        layout.addWidget(self._table, 1)
+
+        self._stat_lbl = QLabel()
+        self._stat_lbl.setStyleSheet(
+            "background:#e8f5e9; color:#256029; border-radius:4px;"
+            "padding:6px 12px; font-size:11px;"
+        )
+        layout.addWidget(self._stat_lbl)
+
+    def refresh(self):
+        current_j = self._combo_jahr.currentData()
+        self._combo_jahr.blockSignals(True)
+        self._combo_jahr.clear()
+        self._combo_jahr.addItem("Alle", None)
+        for j in verfuegbare_jahre_patienten():
+            self._combo_jahr.addItem(str(j), j)
+        for i in range(self._combo_jahr.count()):
+            if self._combo_jahr.itemData(i) == current_j:
+                self._combo_jahr.setCurrentIndex(i)
+                break
+        self._combo_jahr.blockSignals(False)
+        self._lade()
+
+    def _filter_reset(self):
+        self._combo_jahr.blockSignals(True)
+        self._combo_monat.blockSignals(True)
+        self._suche.blockSignals(True)
+        self._combo_jahr.setCurrentIndex(0)
+        self._combo_monat.setCurrentIndex(0)
+        self._suche.clear()
+        self._combo_jahr.blockSignals(False)
+        self._combo_monat.blockSignals(False)
+        self._suche.blockSignals(False)
+        self._lade()
+
+    def _filter_changed(self):
+        self._lade()
+
+    def _lade(self):
+        jahr  = self._combo_jahr.currentData()
+        monat = self._combo_monat.currentData()
+        suche = self._suche.text().strip() or None
+        try:
+            eintraege = lade_patienten(monat=monat, jahr=jahr, suchtext=suche)
+        except Exception as exc:
+            QMessageBox.critical(self, "Datenbankfehler", str(exc))
+            return
+        self._eintraege = eintraege
+        self._table.setRowCount(len(eintraege))
+        for row, p in enumerate(eintraege):
+            def _item(text: str, center: bool = False) -> QTableWidgetItem:
+                item = QTableWidgetItem(str(text) if text else "")
+                if center:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                return item
+            name    = p.get("patient_name", "")
+            abtlg   = p.get("patient_abteilung", "")
+            display = f"{name} ({abtlg})" if name and abtlg else (name or "—")
+            beschwerde = p.get("beschwerde_art", "") or p.get("symptome", "")
+            massnahmen = p.get("massnahmen", "")
+            self._table.setItem(row, 0,  _item(str(row + 1), center=True))
+            self._table.setItem(row, 1,  _item(p.get("datum", "")))
+            self._table.setItem(row, 2,  _item(p.get("uhrzeit", ""), center=True))
+            dauer = p.get("behandlungsdauer", 0) or 0
+            self._table.setItem(row, 3,  _item(str(dauer) if dauer else "—", center=True))
+            self._table.setItem(row, 4,  _item(p.get("patient_typ", "") or "—"))
+            self._table.setItem(row, 5,  _item(display))
+            alter = p.get("patient_alter", 0)
+            self._table.setItem(row, 6,  _item(str(alter) if alter else "—", center=True))
+            self._table.setItem(row, 7,  _item(
+                beschwerde[:47] + "..." if len(beschwerde) > 50 else beschwerde
+            ))
+            self._table.setItem(row, 8,  _item(p.get("unfall_ort", "") or "—"))
+            self._table.setItem(row, 9,  _item(
+                massnahmen[:47] + "..." if len(massnahmen) > 50 else massnahmen
+            ))
+            self._table.setItem(row, 10, _item(p.get("drk_ma1", "")))
+            self._table.setItem(row, 11, _item(p.get("weitergeleitet", "") or "—"))
+            bg = p.get("arbeitsunfall", 0)
+            bg_item = _item("✓ BG" if bg else "—", center=True)
+            if bg:
+                bg_item.setForeground(QColor("#b00000"))
+            self._table.setItem(row, 12, bg_item)
+        n = len(eintraege)
+        self._treffer_lbl.setText(f"{n} Patient{'en' if n != 1 else ''} gefunden")
+        self._stat_lbl.setText(f"📊  Gesamt: {n} Patient{'en' if n != 1 else ''}")
+        self._auswahl_geaendert()
+
+    def _auswahl_geaendert(self):
+        has = len(self._table.selectedItems()) > 0
+        self._btn_bearbeiten.setEnabled(has)
+        self._btn_loeschen.setEnabled(has)
+        self._btn_material.setEnabled(has)
+        self._btn_word.setEnabled(has)
+        self._btn_mail.setEnabled(has)
+
+    def _neu(self):
+        dlg = _PatientenDialog(parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            daten, material = dlg.get_data()
+            try:
+                patient_speichern(daten, material)
+                self.refresh()
+                QMessageBox.information(self, "Erfolg", "Patient erfolgreich erfasst.")
+            except Exception as exc:
+                QMessageBox.critical(self, "Fehler beim Speichern", str(exc))
+
+    def _bearbeiten(self):
+        row = self._table.currentRow()
+        if row < 0 or row >= len(self._eintraege):
+            return
+        eintrag = self._eintraege[row]
+        dlg = _PatientenDialog(daten=eintrag, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            daten, material = dlg.get_data()
+            try:
+                patient_aktualisieren(eintrag["id"], daten, material)
+                self.refresh()
+                QMessageBox.information(self, "Erfolg", "Patient aktualisiert.")
+            except Exception as exc:
+                QMessageBox.critical(self, "Fehler beim Aktualisieren", str(exc))
+
+    def _loeschen(self):
+        row = self._table.currentRow()
+        if row < 0 or row >= len(self._eintraege):
+            return
+        eintrag = self._eintraege[row]
+        antwort = QMessageBox.question(
+            self, "Löschen bestätigen",
+            f"Patienten-Datensatz vom {eintrag.get('datum','')} wirklich löschen?\n"
+            f"Diese Aktion kann nicht rückgängig gemacht werden.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if antwort == QMessageBox.StandardButton.Yes:
+            try:
+                patient_loeschen(eintrag["id"])
+                self.refresh()
+                QMessageBox.information(self, "Gelöscht", "Patient wurde gelöscht.")
+            except Exception as exc:
+                QMessageBox.critical(self, "Fehler beim Löschen", str(exc))
+
+    def _material_anzeigen(self):
+        row = self._table.currentRow()
+        if row < 0 or row >= len(self._eintraege):
+            return
+        eintrag = self._eintraege[row]
+        try:
+            material = lade_verbrauchsmaterial(eintrag["id"])
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler", str(exc))
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(
+            f"📦  Verbrauchsmaterial – "
+            f"{eintrag.get('patient_name', 'Patient')} ({eintrag.get('datum', '')})"
+        )
+        dlg.setMinimumWidth(500)
+        layout = QVBoxLayout(dlg)
+        if not material:
+            layout.addWidget(QLabel("Kein Verbrauchsmaterial erfasst."))
+        else:
+            table = QTableWidget()
+            table.setColumnCount(3)
+            table.setHorizontalHeaderLabels(["Material", "Menge", "Einheit"])
+            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            table.setRowCount(len(material))
+            for row_m, m in enumerate(material):
+                table.setItem(row_m, 0, QTableWidgetItem(m.get("material", "")))
+                table.setItem(row_m, 1, QTableWidgetItem(str(m.get("menge", ""))))
+                table.setItem(row_m, 2, QTableWidgetItem(m.get("einheit", "")))
+            layout.addWidget(table)
+        btn_close = QPushButton("Schließen")
+        btn_close.clicked.connect(dlg.accept)
+        layout.addWidget(btn_close)
+        dlg.exec()
+
+    def _word_protokoll(self):
+        row = self._table.currentRow()
+        if row < 0 or row >= len(self._eintraege):
+            return
+        eintrag = self._eintraege[row]
+        try:
+            material = lade_verbrauchsmaterial(eintrag["id"])
+            pfad = export_patient_word(eintrag, material)
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler beim Word-Export", str(exc))
+            return
+        antwort = QMessageBox.question(
+            self, "Word-Protokoll erstellt",
+            f"Das Protokoll wurde gespeichert:\n{pfad}\n\nJetzt in Word öffnen?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if antwort == QMessageBox.StandardButton.Yes:
+            os.startfile(pfad)
+
+    def _mail_protokoll(self):
+        row = self._table.currentRow()
+        if row < 0 or row >= len(self._eintraege):
+            return
+        eintrag = self._eintraege[row]
+
+        # Word-Datei erstellen
+        try:
+            material = lade_verbrauchsmaterial(eintrag["id"])
+            word_pfad = export_patient_word(eintrag, material)
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler beim Word-Export", str(exc))
+            return
+
+        # Mail-Dialog
+        dlg = _PatientenMailDialog(
+            word_pfad=word_pfad,
+            patient_name=eintrag.get("patient_name", ""),
+            datum=eintrag.get("datum", ""),
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        empfaenger, betreff, body = dlg.get_daten()
+
+        try:
+            from functions.mail_functions import create_outlook_draft
+            logo_pfad = os.path.join(BASE_DIR, "Daten", "Email", "Logo.jpg")
+            create_outlook_draft(
+                to=empfaenger,
+                subject=betreff,
+                body_text=body,
+                attachment_path=word_pfad,
+                logo_path=logo_pfad if os.path.isfile(logo_pfad) else None,
+            )
+            QMessageBox.information(
+                self, "Outlook geöffnet",
+                "Der Outlook-Entwurf wurde geöffnet.\n"
+                "Bitte prüfen und manuell absenden."
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler beim E-Mail-Versand", str(exc))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1593,6 +3148,9 @@ class DienstlichesWidget(QWidget):
         self._einsaetze_tab = _EinsaetzeTab()
         self._tabs.addTab(self._einsaetze_tab, "🚑  Einsätze")
 
+        self._patienten_tab = _PatientenTab()
+        self._tabs.addTab(self._patienten_tab, "🏥  Patienten DRK Station")
+
         self._uebersicht_tab = _UebersichtTab()
         self._tabs.addTab(self._uebersicht_tab, "📊  Übersicht")
 
@@ -1600,10 +3158,11 @@ class DienstlichesWidget(QWidget):
         layout.addWidget(self._tabs, 1)
 
     def _on_tab_changed(self, idx: int):
-        if idx == 1:
+        if idx == 2:
             self._uebersicht_tab.refresh()
 
     def refresh(self):
         self._einsaetze_tab.refresh()
-        if self._tabs.currentIndex() == 1:
+        self._patienten_tab.refresh()
+        if self._tabs.currentIndex() == 2:
             self._uebersicht_tab.refresh()

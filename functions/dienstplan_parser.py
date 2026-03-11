@@ -5,6 +5,8 @@ Erkennt Namen, Dienstzeiten, Betreuer/Dispo-Unterscheidung dynamisch
 """
 import os
 import sys
+import shutil
+import tempfile
 import openpyxl
 import re
 from pathlib import Path
@@ -102,8 +104,19 @@ class DienstplanParser:
             }
         """
         try:
-            self.workbook = openpyxl.load_workbook(self.excel_path, data_only=True)
-            self.sheet    = self.workbook.active
+            # Datei in temp-Kopie lesen – umgeht Windows-Sperren (z.B. Excel offen / OneDrive-Sync)
+            tmp_file = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tf:
+                    tmp_file = tf.name
+                shutil.copy2(self.excel_path, tmp_file)
+                self.workbook = openpyxl.load_workbook(tmp_file, data_only=True)
+            except PermissionError as pe:
+                raise PermissionError(
+                    f"Datei ist gesperrt (vermutlich in Excel geöffnet oder OneDrive synchronisiert):\n"
+                    f"{self.excel_path}"
+                ) from pe
+            self.sheet = self.workbook.active
 
             self.column_map = self._find_columns()
             if not self.column_map:
@@ -203,6 +216,11 @@ class DienstplanParser:
         finally:
             if self.workbook:
                 self.workbook.close()
+            if tmp_file and os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
 
     # ------------------------------------------------------------------
     # Interne Hilfsmethoden
