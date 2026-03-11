@@ -17,8 +17,8 @@ PROTOKOLL_DIR = BASE_DIR / "Daten" / "Spät" / "Protokoll"
 # Automatisch voreingestellte Dienstbeginn-Zeiten je Dienstart
 _DIENST_BEGINN = {
     "T":   "06:00",
-    "T10": "06:00",
-    "N":   "21:00",
+    "T10": "09:00",
+    "N":   "18:00",
     "N10": "21:00",
 }
 
@@ -44,15 +44,20 @@ def berechne_verspaetung_min(dienstbeginn: str, dienstantritt: str) -> int:
 def _fill_cell(cell, text: str):
     """
     Setzt den Text der ersten Paragraph eines Word-Tabellenfeldes.
-    Bestehende Runs werden geleert, ein neuer wird erzeugt falls nötig.
+    Entfernt ALLE Inline-Inhalte (auch Nicht-Run-Elemente wie eingebettete
+    Kästchen-Zeichen) und schreibt einen neuen Run (Arial 12pt) mit dem Text.
     """
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
     para = cell.paragraphs[0]
-    for run in para.runs:
-        run.text = ""
-    if para.runs:
-        para.runs[0].text = text
-    else:
-        para.add_run(text)
+    p_elem = para._p
+    # Alle Kinder außer den Absatz-Eigenschaften (w:pPr) entfernen
+    for child in list(p_elem):
+        if child.tag != qn("w:pPr"):
+            p_elem.remove(child)
+    run = para.add_run(text)
+    run.font.name = "Arial"
+    run.font.size = Pt(12)
 
 
 def erstelle_verspaetungs_dokument(daten: dict) -> str:
@@ -118,17 +123,38 @@ def erstelle_verspaetungs_dokument(daten: dict) -> str:
     _fill_cell(t0.rows[6].cells[1], daten.get("begruendung", ""))
 
     # ── Tabelle 1 ──────────────────────────────────────────────────────────────
-    # "Aufgenommen von" – Name in den 2. Paragraph der Zelle
-    cell_aufgen = t1.rows[0].cells[0]
-    paras = cell_aufgen.paragraphs
-    if len(paras) > 1:
-        para_name = paras[1]
-        for run in para_name.runs:
-            run.text = ""
-        if para_name.runs:
-            para_name.runs[0].text = daten.get("aufgenommen_von", "")
-        else:
-            para_name.add_run(daten.get("aufgenommen_von", ""))
+    # Den Namen in den leeren Paragraph direkt VOR der Tabelle (im Dokument-Body)
+    # schreiben – das ist die Position, die im Formular über dem Strich erscheint.
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+    body = doc.element.body
+    t1_elem = doc.tables[1]._tbl
+    body_children = list(body)
+    t1_idx = body_children.index(t1_elem)
+    # Paragraph direkt vor der Tabelle befüllen
+    para_vor_tabelle = body_children[t1_idx - 1] if t1_idx > 0 else None
+    if para_vor_tabelle is not None and para_vor_tabelle.tag.endswith("}p"):
+        from docx.oxml.ns import qn as _qn
+        # Vorhandene Runs löschen
+        for child in list(para_vor_tabelle):
+            if child.tag != _qn("w:pPr"):
+                para_vor_tabelle.remove(child)
+        # Neuen Run mit Arial 12pt einfügen
+        from docx.oxml import OxmlElement
+        new_r = OxmlElement("w:r")
+        new_rpr = OxmlElement("w:rPr")
+        new_fonts = OxmlElement("w:rFonts")
+        new_fonts.set(qn("w:ascii"), "Arial")
+        new_fonts.set(qn("w:hAnsi"), "Arial")
+        new_rpr.append(new_fonts)
+        new_sz = OxmlElement("w:sz")
+        new_sz.set(qn("w:val"), "24")   # 24 half-points = 12pt
+        new_rpr.append(new_sz)
+        new_r.append(new_rpr)
+        new_t = OxmlElement("w:t")
+        new_t.text = daten.get("aufgenommen_von", "")
+        new_r.append(new_t)
+        para_vor_tabelle.append(new_r)
 
     doc.save(str(ziel_pfad))
     return str(ziel_pfad)

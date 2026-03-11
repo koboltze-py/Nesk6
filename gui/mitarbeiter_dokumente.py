@@ -612,9 +612,9 @@ class _VerspaetungDialog(QDialog):
 
     _DIENST_ITEMS = [
         ("T – Tagdienst (06:00)",   "T",   "06:00"),
-        ("T10 – Tagdienst 10h",     "T10", "06:00"),
-        ("N – Nachtdienst (21:00)", "N",   "21:00"),
-        ("N10 – Nachtdienst 10h",   "N10", "21:00"),
+        ("T10 – Tagdienst (09:00)", "T10", "09:00"),
+        ("N – Nachtdienst (18:00)", "N",   "18:00"),
+        ("N10 – Nachtdienst (21:00)", "N10", "21:00"),
     ]
 
     def __init__(self, daten: dict | None = None, parent=None):
@@ -675,17 +675,43 @@ class _VerspaetungDialog(QDialog):
         self._dienst_combo.currentIndexChanged.connect(self._on_dienst_changed)
         form.addRow("Dienstart *:", self._dienst_combo)
 
-        # Dienstbeginn
+        # Dienstbeginn (Sollwert) – schreibgeschützt, nur nach Warnung änderbar
         self._beginn = QTimeEdit(QTime(6, 0))
         self._beginn.setDisplayFormat("HH:mm")
+        self._beginn.setReadOnly(True)
+        self._beginn.setStyleSheet("background:#f0f0f0; color:#555;")
         self._beginn.timeChanged.connect(self._update_verspaetung)
-        form.addRow("Dienstbeginn:", self._beginn)
+        self._btn_beginn_unlock = QPushButton("🔒 Ändern")
+        self._btn_beginn_unlock.setFixedWidth(90)
+        self._btn_beginn_unlock.setToolTip("Sollwert des Dienstbeginns anpassen")
+        self._btn_beginn_unlock.clicked.connect(self._on_beginn_unlock)
+        beginn_widget = QWidget()
+        beginn_row = QHBoxLayout(beginn_widget)
+        beginn_row.setContentsMargins(0, 0, 0, 0)
+        beginn_row.setSpacing(6)
+        beginn_row.addWidget(self._beginn)
+        beginn_row.addWidget(self._btn_beginn_unlock)
+        form.addRow("Dienstbeginn (Soll):", beginn_widget)
 
-        # Dienstantritt
+        # Dienstantritt – startet mit Sollwert; individuelle Eingabe möglich
         self._antritt = QTimeEdit(QTime(6, 0))
         self._antritt.setDisplayFormat("HH:mm")
         self._antritt.timeChanged.connect(self._update_verspaetung)
         form.addRow("Tatsächlicher Antritt *:", self._antritt)
+
+        # Schnellauswahl: +N Minuten auf den tatsächlichen Antritt addieren
+        schnell_widget = QWidget()
+        schnell_layout = QHBoxLayout(schnell_widget)
+        schnell_layout.setContentsMargins(0, 0, 0, 0)
+        schnell_layout.setSpacing(4)
+        for _min in [10, 20, 30, 40, 50, 60]:
+            _b = QPushButton(f"+{_min}")
+            _b.setFixedWidth(42)
+            _b.setToolTip(f"+{_min} Minuten zum tatsächlichen Antritt addieren")
+            _b.clicked.connect(lambda checked, n=_min: self._on_add_minutes(n))
+            schnell_layout.addWidget(_b)
+        schnell_layout.addStretch()
+        form.addRow("+ Minuten:", schnell_widget)
 
         # Verspätung (readonly)
         self._versp_lbl = QLabel("0 Minuten")
@@ -721,21 +747,58 @@ class _VerspaetungDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
+        btn_nur_speichern = _btn_light("💾  Nur speichern")
+        btn_nur_speichern.clicked.connect(self._on_nur_speichern)
         btn_erstellen = _btn("📄  Dokument erstellen", FIORI_BLUE)
         btn_erstellen.clicked.connect(self._on_accept)
         btn_abbrechen = _btn_light("Abbrechen")
         btn_abbrechen.clicked.connect(self.reject)
         btn_row.addStretch()
+        btn_row.addWidget(btn_nur_speichern)
         btn_row.addWidget(btn_erstellen)
         btn_row.addWidget(btn_abbrechen)
         layout.addLayout(btn_row)
 
+        self._nur_speichern = False
         self._update_verspaetung()
 
     def _on_dienst_changed(self, idx: int):
         _, code, beginn = self._DIENST_ITEMS[idx]
         h, m = map(int, beginn.split(":"))
         self._beginn.setTime(QTime(h, m))
+        # Tatsächlichen Antritt ebenfalls auf Sollwert zurücksetzen
+        self._antritt.setTime(QTime(h, m))
+        # Schloss wieder schließen
+        self._beginn.setReadOnly(True)
+        self._beginn.setStyleSheet("background:#f0f0f0; color:#555;")
+        self._btn_beginn_unlock.setText("🔒 Ändern")
+
+    def _on_beginn_unlock(self):
+        if self._beginn.isReadOnly():
+            antwort = QMessageBox.warning(
+                self,
+                "Sollwert ändern",
+                "Du bist dabei, den Sollwert des Dienstbeginns zu ändern.\n"
+                "Das sollte nur in Ausnahmefällen nötig sein.\n\n"
+                "Möchtest du den Sollwert wirklich anpassen?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if antwort == QMessageBox.StandardButton.Yes:
+                self._beginn.setReadOnly(False)
+                self._beginn.setStyleSheet("")
+                self._btn_beginn_unlock.setText("🔓 Gesperrt")
+        else:
+            self._beginn.setReadOnly(True)
+            self._beginn.setStyleSheet("background:#f0f0f0; color:#555;")
+            self._btn_beginn_unlock.setText("🔒 Ändern")
+
+    def _on_add_minutes(self, minuten: int):
+        """Addiert N Minuten zum tatsächlichen Dienstantritt."""
+        t = self._antritt.time()
+        total = t.hour() * 60 + t.minute() + minuten
+        total = total % (24 * 60)  # Tagesüberlauf abfangen
+        self._antritt.setTime(QTime(total // 60, total % 60))
 
     def _update_verspaetung(self):
         b = self._beginn.time()
@@ -757,11 +820,20 @@ class _VerspaetungDialog(QDialog):
                 "font-weight:bold; color:#2d6a2d; font-size:13px; padding:2px 0;"
             )
 
+    def _on_nur_speichern(self):
+        ma = self._ma_combo.currentText().strip()
+        if not ma:
+            QMessageBox.warning(self, "Pflichtfeld", "Bitte Mitarbeiter angeben.")
+            return
+        self._nur_speichern = True
+        self.accept()
+
     def _on_accept(self):
         ma = self._ma_combo.currentText().strip()
         if not ma:
             QMessageBox.warning(self, "Pflichtfeld", "Bitte Mitarbeiter angeben.")
             return
+        self._nur_speichern = False
         self.accept()
 
     def _prefill(self, daten: dict):
@@ -1464,6 +1536,11 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._versp_btn_mail.clicked.connect(self._verspaetung_mail_senden)
         vbtn_row.addWidget(self._versp_btn_mail)
 
+        self._versp_btn_ordner = _btn_light("📁  Ordner öffnen")
+        self._versp_btn_ordner.setToolTip("Word-Ordner mit den Verspätungs-Dokumenten öffnen")
+        self._versp_btn_ordner.clicked.connect(self._verspaetung_ordner_oeffnen)
+        vbtn_row.addWidget(self._versp_btn_ordner)
+
         self._versp_btn_loeschen = _btn_light("🗑  Löschen")
         self._versp_btn_loeschen.setEnabled(False)
         self._versp_btn_loeschen.setToolTip("Eintrag aus Protokoll löschen (Dokument bleibt erhalten)")
@@ -1802,22 +1879,27 @@ class MitarbeiterDokumenteWidget(QWidget):
         if not daten.get("mitarbeiter"):
             return
         try:
-            dokument_pfad = erstelle_verspaetungs_dokument(daten)
-            daten["dokument_pfad"] = dokument_pfad
-            verspaetung_speichern(daten)
-            self._versp_lade()
-            antwort = QMessageBox.question(
-                self,
-                "Verspätungsmeldung erstellt",
-                f"Das Dokument wurde erstellt und gespeichert:\n\n📄 {dokument_pfad}\n\n"
-                "Dokument jetzt öffnen (drucken)?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if antwort == QMessageBox.StandardButton.Yes:
-                try:
-                    oeffne_versp_dokument(dokument_pfad)
-                except Exception as exc:
-                    QMessageBox.warning(self, "Öffnen fehlgeschlagen", str(exc))
+            if dlg._nur_speichern:
+                verspaetung_speichern(daten)
+                self._versp_lade()
+                QMessageBox.information(self, "Gespeichert", "Verspätungsmeldung wurde gespeichert (kein Dokument erstellt).")
+            else:
+                dokument_pfad = erstelle_verspaetungs_dokument(daten)
+                daten["dokument_pfad"] = dokument_pfad
+                verspaetung_speichern(daten)
+                self._versp_lade()
+                antwort = QMessageBox.question(
+                    self,
+                    "Verspätungsmeldung erstellt",
+                    f"Das Dokument wurde erstellt und gespeichert:\n\n📄 {dokument_pfad}\n\n"
+                    "Dokument jetzt öffnen (drucken)?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if antwort == QMessageBox.StandardButton.Yes:
+                    try:
+                        oeffne_versp_dokument(dokument_pfad)
+                    except Exception as exc:
+                        QMessageBox.warning(self, "Öffnen fehlgeschlagen", str(exc))
         except Exception as exc:
             QMessageBox.critical(self, "Fehler beim Erstellen", str(exc))
 
@@ -1831,21 +1913,26 @@ class MitarbeiterDokumenteWidget(QWidget):
             return
         daten = dlg.get_daten()
         try:
-            dokument_pfad = erstelle_verspaetungs_dokument(daten)
-            daten["dokument_pfad"] = dokument_pfad
-            verspaetung_aktualisieren(e["id"], daten)
-            self._versp_lade()
-            antwort = QMessageBox.question(
-                self,
-                "Eintrag aktualisiert",
-                f"Dokument wurde neu erstellt:\n\n📄 {dokument_pfad}\n\nJetzt öffnen?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if antwort == QMessageBox.StandardButton.Yes:
-                try:
-                    oeffne_versp_dokument(dokument_pfad)
-                except Exception as exc:
-                    QMessageBox.warning(self, "Öffnen fehlgeschlagen", str(exc))
+            if dlg._nur_speichern:
+                verspaetung_aktualisieren(e["id"], daten)
+                self._versp_lade()
+                QMessageBox.information(self, "Gespeichert", "Eintrag wurde gespeichert (kein Dokument erstellt).")
+            else:
+                dokument_pfad = erstelle_verspaetungs_dokument(daten)
+                daten["dokument_pfad"] = dokument_pfad
+                verspaetung_aktualisieren(e["id"], daten)
+                self._versp_lade()
+                antwort = QMessageBox.question(
+                    self,
+                    "Eintrag aktualisiert",
+                    f"Dokument wurde neu erstellt:\n\n📄 {dokument_pfad}\n\nJetzt öffnen?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if antwort == QMessageBox.StandardButton.Yes:
+                    try:
+                        oeffne_versp_dokument(dokument_pfad)
+                    except Exception as exc:
+                        QMessageBox.warning(self, "Öffnen fehlgeschlagen", str(exc))
         except Exception as exc:
             QMessageBox.critical(self, "Fehler beim Bearbeiten", str(exc))
 
@@ -1884,6 +1971,15 @@ class MitarbeiterDokumenteWidget(QWidget):
                 f"Das Dokument wurde nicht gefunden:\n{pfad}\n\n"
                 "Es wurde möglicherweise verschoben oder gelöscht."
             )
+
+    def _verspaetung_ordner_oeffnen(self):
+        from functions.verspaetung_functions import PROTOKOLL_DIR
+        ordner = str(PROTOKOLL_DIR)
+        os.makedirs(ordner, exist_ok=True)
+        try:
+            os.startfile(ordner)
+        except Exception as exc:
+            QMessageBox.warning(self, "Fehler", f"Ordner konnte nicht geöffnet werden:\n{exc}")
 
     def _verspaetung_mail_senden(self):
         """Outlook-Entwurf mit dem Verspätungsdokument als Anhang erstellen."""

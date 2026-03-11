@@ -30,30 +30,33 @@ from gui.main_window import MainWindow
 
 
 def _db_startup_backup():
-    """Erstellt beim Programmstart ein SQLite-Backup der Datenbank.
-    Behält die letzten 7 Backups; ältere werden gelöscht."""
+    """Erstellt beim Programmstart ein SQLite-Backup aller Datenbanken im
+    'database SQL'-Verzeichnis. Behält die letzten 7 Backups je Datenbank."""
     try:
         from config import DB_PATH
-        if not os.path.exists(DB_PATH):
-            return  # DB existiert noch nicht (Erststart)
-        backup_dir = os.path.join(os.path.dirname(DB_PATH), "Backup Data", "db_backups")
+        db_dir = os.path.dirname(DB_PATH)
+        backup_dir = os.path.join(db_dir, "Backup Data", "db_backups")
         os.makedirs(backup_dir, exist_ok=True)
         datum = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = os.path.join(backup_dir, f"nesk3_{datum}.db")
-        # SQLite-native Online-Backup (atomar, keine Lock-Probleme)
-        src = sqlite3.connect(DB_PATH)
-        dst = sqlite3.connect(backup_path)
-        src.backup(dst)
-        dst.close()
-        src.close()
-        # Nur die letzten 7 Backups behalten
-        alle = sorted(glob.glob(os.path.join(backup_dir, "nesk3_*.db")))
-        for alt in alle[:-7]:
-            try:
-                os.remove(alt)
-            except Exception:
-                pass
-        print(f"[OK] DB-Backup erstellt: {os.path.basename(backup_path)}")
+
+        # Alle .db-Dateien direkt im database SQL-Ordner sichern (keine Unterordner)
+        for db_path in glob.glob(os.path.join(db_dir, "*.db")):
+            name = os.path.splitext(os.path.basename(db_path))[0]
+            backup_path = os.path.join(backup_dir, f"{name}_{datum}.db")
+            # SQLite-native Online-Backup (atomar, keine Lock-Probleme)
+            src = sqlite3.connect(db_path)
+            dst = sqlite3.connect(backup_path)
+            src.backup(dst)
+            dst.close()
+            src.close()
+            # Nur die letzten 7 Backups behalten
+            alle = sorted(glob.glob(os.path.join(backup_dir, f"{name}_*.db")))
+            for alt in alle[:-7]:
+                try:
+                    os.remove(alt)
+                except Exception:
+                    pass
+            print(f"[OK] DB-Backup erstellt: {os.path.basename(backup_path)}")
     except Exception as e:
         print(f"[WARNUNG] DB-Backup fehlgeschlagen: {e}")
 

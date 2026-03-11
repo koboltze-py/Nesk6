@@ -12,9 +12,10 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QSplitter, QTextEdit, QLineEdit,
     QSpinBox, QComboBox, QFormLayout, QMessageBox, QSizePolicy,
-    QDateEdit, QDialog, QDialogButtonBox, QListWidget, QFileDialog
+    QDateEdit, QDialog, QDialogButtonBox, QListWidget, QFileDialog,
+    QTimeEdit
 )
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QTime
 from PySide6.QtGui import QFont, QColor
 
 from config import (
@@ -37,6 +38,7 @@ from functions.fahrzeug_functions import (
     markiere_schaden_gesendet,
 )
 from functions.verspaetung_db import lade_verspaetungen_fuer_datum as lade_vsp_aus_db
+from functions.mitarbeiter_functions import lade_mitarbeiter_namen
 
 # ── Farben ──────────────────────────────────────────────────────────────────
 _TAG_COLOR    = "#e67e22"   # Orange für Tagdienst
@@ -467,7 +469,9 @@ class UebergabeWidget(QWidget):
         _vsp_hint.setStyleSheet("color: #aaa; font-size: 10px; border: none;")
         self._verspaetungen_section_layout.addWidget(_vsp_hint)
         layout.addWidget(self._verspaetungen_section)
-        self._btn_add_verspaetung = QPushButton("➕ Verspätung hinzufügen")
+        _vsp_btn_row = QHBoxLayout()
+        _vsp_btn_row.setSpacing(6)
+        self._btn_add_verspaetung = QPushButton("➕ Manuell hinzufügen")
         self._btn_add_verspaetung.setFixedHeight(28)
         self._btn_add_verspaetung.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_add_verspaetung.setStyleSheet(
@@ -476,7 +480,29 @@ class UebergabeWidget(QWidget):
             "QPushButton:hover{background:#ffe0b0;}"
         )
         self._btn_add_verspaetung.clicked.connect(self._add_verspaetung_row)
-        layout.addWidget(self._btn_add_verspaetung)
+        self._btn_add_verspaetung_db_picker = QPushButton("👤 Aus DB wählen")
+        self._btn_add_verspaetung_db_picker.setFixedHeight(28)
+        self._btn_add_verspaetung_db_picker.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_add_verspaetung_db_picker.setStyleSheet(
+            "QPushButton{background:#e8f4f9;border:1px solid #90cbe0;"
+            "border-radius:4px;padding:2px 10px;color:#1a5b78;font-size:11px;}"
+            "QPushButton:hover{background:#cde8f5;}"
+        )
+        self._btn_add_verspaetung_db_picker.clicked.connect(self._pick_mitarbeiter_from_db)
+        self._btn_pick_vsp_db = QPushButton("📋 Aus Verspätungen wählen")
+        self._btn_pick_vsp_db.setFixedHeight(28)
+        self._btn_pick_vsp_db.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_pick_vsp_db.setStyleSheet(
+            "QPushButton{background:#f0e8ff;border:1px solid #b090e0;"
+            "border-radius:4px;padding:2px 10px;color:#5a2d8a;font-size:11px;}"
+            "QPushButton:hover{background:#e0d0ff;}"
+        )
+        self._btn_pick_vsp_db.clicked.connect(self._pick_from_verspaetungen_db)
+        _vsp_btn_row.addWidget(self._btn_add_verspaetung)
+        _vsp_btn_row.addWidget(self._btn_add_verspaetung_db_picker)
+        _vsp_btn_row.addWidget(self._btn_pick_vsp_db)
+        _vsp_btn_row.addStretch()
+        layout.addLayout(_vsp_btn_row)
 
         # Übergabe-Notiz
         layout.addWidget(self._section_label("📝 Übergabe-Notiz (für die Folgeschicht)"))
@@ -956,9 +982,275 @@ class UebergabeWidget(QWidget):
             hint.setStyleSheet("color: #aaa; font-size: 10px; border: none;")
             self._verspaetungen_section_layout.addWidget(hint)
 
+    def _pick_mitarbeiter_from_db(self):
+        """Öffnet einen Dialog zur Auswahl eines Mitarbeiters aus der DB."""
+        try:
+            namen = lade_mitarbeiter_namen(nur_aktive=True)
+        except Exception:
+            namen = []
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Mitarbeiter aus Datenbank wählen")
+        dlg.setMinimumWidth(340)
+        dlg.setMinimumHeight(380)
+        dlg.setStyleSheet("background: white;")
+
+        vlay = QVBoxLayout(dlg)
+        vlay.setSpacing(8)
+        vlay.setContentsMargins(12, 12, 12, 12)
+
+        hint = QLabel("Mitarbeiter auswählen (Doppelklick oder OK):")
+        hint.setStyleSheet("color: #333; font-size: 11px;")
+        vlay.addWidget(hint)
+
+        search = QLineEdit()
+        search.setPlaceholderText("🔍 Suchen …")
+        search.setStyleSheet(
+            "border: 1px solid #ccc; border-radius: 3px; padding: 4px 8px; font-size: 11px;"
+        )
+        vlay.addWidget(search)
+
+        lst = QListWidget()
+        lst.setStyleSheet(
+            "border: 1px solid #ccc; border-radius: 3px; font-size: 12px;"
+        )
+        lst.addItems(namen)
+        vlay.addWidget(lst)
+
+        def _filter(text):
+            for i in range(lst.count()):
+                item = lst.item(i)
+                item.setHidden(text.lower() not in item.text().lower())
+
+        search.textChanged.connect(_filter)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        lst.itemDoubleClicked.connect(lambda _: dlg.accept())
+        vlay.addWidget(btns)
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            sel = lst.currentItem()
+            if sel:
+                self._add_verspaetung_row(name=sel.text())
+
+    def _versp_erfassungs_dialog(self) -> tuple[str, str, str] | None:
+        """
+        Öffnet einen vollständigen Erfassungsdialog für eine Verspätung.
+        Gibt (name, soll_zeit, ist_zeit) zurück oder None bei Abbruch.
+        """
+        _DIENST_ITEMS = [
+            ("T – Tagdienst (06:00)",     "T",   "06:00"),
+            ("T10 – Tagdienst (09:00)",   "T10", "09:00"),
+            ("N – Nachtdienst (18:00)",   "N",   "18:00"),
+            ("N10 – Nachtdienst (21:00)", "N10", "21:00"),
+        ]
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("⏰ Verspätung erfassen")
+        dlg.setMinimumWidth(480)
+        dlg.setStyleSheet("background:white;")
+
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(10)
+        layout.setContentsMargins(18, 18, 18, 14)
+
+        title = QLabel("Meldung über unpünktlichen Dienstantritt")
+        title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        title.setStyleSheet(f"color:{FIORI_BLUE};")
+        layout.addWidget(title)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        # Mitarbeiter
+        ma_combo = QComboBox()
+        ma_combo.setEditable(True)
+        ma_combo.setMinimumWidth(240)
+        ma_combo.lineEdit().setPlaceholderText("Name eingeben …")
+        try:
+            for n in lade_mitarbeiter_namen(nur_aktive=True):
+                ma_combo.addItem(n)
+        except Exception:
+            pass
+        form.addRow("Mitarbeiter *:", ma_combo)
+
+        # Dienstart
+        dienst_combo = QComboBox()
+        for label, code, _ in _DIENST_ITEMS:
+            dienst_combo.addItem(label, code)
+        form.addRow("Dienstart *:", dienst_combo)
+
+        # Dienstbeginn (Soll) – gesperrt
+        beginn_edit = QTimeEdit(QTime(6, 0))
+        beginn_edit.setDisplayFormat("HH:mm")
+        beginn_edit.setReadOnly(True)
+        beginn_edit.setStyleSheet("background:#f0f0f0;color:#555;")
+        form.addRow("Dienstbeginn (Soll):", beginn_edit)
+
+        # Tatsächlicher Antritt
+        antritt_edit = QTimeEdit(QTime(6, 0))
+        antritt_edit.setDisplayFormat("HH:mm")
+        form.addRow("Tatsächlicher Antritt:", antritt_edit)
+
+        # Schnellauswahl +N Minuten
+        schnell_w = QWidget()
+        schnell_lay = QHBoxLayout(schnell_w)
+        schnell_lay.setContentsMargins(0, 0, 0, 0)
+        schnell_lay.setSpacing(4)
+        for _m in [10, 20, 30, 40, 50, 60]:
+            _b = QPushButton(f"+{_m}")
+            _b.setFixedWidth(42)
+            _b.clicked.connect(lambda checked, n=_m: antritt_edit.setTime(
+                QTime((antritt_edit.time().hour() * 60 + antritt_edit.time().minute() + n) // 60 % 24,
+                      (antritt_edit.time().hour() * 60 + antritt_edit.time().minute() + n) % 60)
+            ))
+            schnell_lay.addWidget(_b)
+        schnell_lay.addStretch()
+        form.addRow("+ Minuten:", schnell_w)
+
+        # Verspätungsanzeige
+        versp_lbl = QLabel("0 Minuten")
+        versp_lbl.setStyleSheet("font-weight:bold;color:#c00;font-size:12px;")
+        form.addRow("Verspätung:", versp_lbl)
+
+        layout.addLayout(form)
+
+        def _update_versp():
+            b = beginn_edit.time()
+            a = antritt_edit.time()
+            diff = (a.hour() * 60 + a.minute()) - (b.hour() * 60 + b.minute())
+            if diff > 0:
+                versp_lbl.setText(f"⚠ {diff} Minuten zu spät")
+                versp_lbl.setStyleSheet("font-weight:bold;color:#c00;font-size:12px;")
+            elif diff < 0:
+                versp_lbl.setText(f"✅ {abs(diff)} Minuten zu früh")
+                versp_lbl.setStyleSheet("font-weight:bold;color:#2d6a2d;font-size:12px;")
+            else:
+                versp_lbl.setText("✅ Pünktlich")
+                versp_lbl.setStyleSheet("font-weight:bold;color:#2d6a2d;font-size:12px;")
+
+        beginn_edit.timeChanged.connect(_update_versp)
+        antritt_edit.timeChanged.connect(_update_versp)
+
+        def _on_dienst_changed(idx):
+            _, code, beginn = _DIENST_ITEMS[idx]
+            h, m = map(int, beginn.split(":"))
+            beginn_edit.setTime(QTime(h, m))
+            antritt_edit.setTime(QTime(h, m))
+            _update_versp()
+
+        dienst_combo.currentIndexChanged.connect(_on_dienst_changed)
+
+        btn_row = QHBoxLayout()
+        btn_ok = QPushButton("✔  Hinzufügen")
+        btn_ok.setStyleSheet(
+            f"QPushButton{{background:{FIORI_BLUE};color:white;border:none;"
+            "border-radius:4px;padding:5px 16px;font-size:12px;}}"
+            f"QPushButton:hover{{background:#005a9e;}}"
+        )
+        btn_ab = QPushButton("Abbrechen")
+        btn_ab.setStyleSheet(
+            "QPushButton{background:#eee;color:#333;border:none;"
+            "border-radius:4px;padding:5px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#ddd;}"
+        )
+        btn_ok.clicked.connect(dlg.accept)
+        btn_ab.clicked.connect(dlg.reject)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_ok)
+        btn_row.addWidget(btn_ab)
+        layout.addLayout(btn_row)
+
+        _update_versp()
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+
+        ma = ma_combo.currentText().strip()
+        if not ma:
+            return None
+        b = beginn_edit.time()
+        a = antritt_edit.time()
+        soll = f"{b.hour():02d}:{b.minute():02d}"
+        ist  = f"{a.hour():02d}:{a.minute():02d}"
+        return ma, soll, ist
+
+    def _pick_from_verspaetungen_db(self):
+        """Auswahl aus bereits erfassten Verspätungen (verspaetungen.db) für den aktuellen Tag."""
+        datum_iso = self._f_datum.date().toString("yyyy-MM-dd")
+        try:
+            eintraege = lade_vsp_aus_db(datum_iso)
+        except Exception:
+            eintraege = []
+
+        if not eintraege:
+            QMessageBox.information(
+                self, "Keine Verspätungen",
+                f"Für {self._f_datum.date().toString('dd.MM.yyyy')} sind keine "
+                "Verspätungen in der Mitarbeiter-Dokumentation erfasst."
+            )
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Verspätung auswählen")
+        dlg.setMinimumWidth(420)
+        dlg.setMinimumHeight(300)
+        dlg.setStyleSheet("background:white;")
+        vlay = QVBoxLayout(dlg)
+        vlay.setSpacing(8)
+        vlay.setContentsMargins(12, 12, 12, 12)
+
+        vlay.addWidget(QLabel("Verspätung auswählen (Doppelklick oder OK):"))
+
+        lst = QListWidget()
+        lst.setStyleSheet("border:1px solid #ccc;border-radius:3px;font-size:12px;")
+        for e in eintraege:
+            ma    = e.get("mitarbeiter", "?")
+            soll  = e.get("dienstbeginn", "")
+            ist   = e.get("dienstantritt", "")
+            diff  = e.get("verspaetung_min", "")
+            label = f"{ma}   Soll: {soll}  Ist: {ist}  ({diff} Min.)"
+            item_widget = lst.model()
+            lst.addItem(label)
+            lst.item(lst.count() - 1).setData(Qt.ItemDataRole.UserRole, e)
+        vlay.addWidget(lst)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        lst.itemDoubleClicked.connect(lambda _: dlg.accept())
+        vlay.addWidget(btns)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        sel = lst.currentItem()
+        if not sel:
+            return
+        e = sel.data(Qt.ItemDataRole.UserRole)
+        self._add_verspaetung_row(
+            name=e.get("mitarbeiter", ""),
+            soll_zeit=e.get("dienstbeginn", ""),
+            ist_zeit=e.get("dienstantritt", ""),
+        )
+
     def _add_verspaetung_row(self, name: str = "", soll_zeit: str = "", ist_zeit: str = "",
                               _skip_hint_remove: bool = False):
-        """Fügt eine neue Verspätungs-Zeile (Name, Soll-Zeit, Ist-Zeit) hinzu."""
+        """Fügt eine neue Verspätungs-Zeile hinzu.
+        Wird ohne Parameter aufgerufen („manuell‟), öffnet zuerst einen Erfassungsdialog."""
+        if not name and not soll_zeit and not ist_zeit:
+            # Dialog öffnen
+            result = self._versp_erfassungs_dialog()
+            if result is None:
+                return
+            name, soll_zeit, ist_zeit = result
+
         if not _skip_hint_remove and self._verspaetungen_section_layout.count() > 0:
             first = self._verspaetungen_section_layout.itemAt(0)
             if first and first.widget() and isinstance(first.widget(), QLabel):
@@ -1057,10 +1349,20 @@ class UebergabeWidget(QWidget):
             "border-radius:3px;padding:1px 5px;"
         )
 
+        hide_btn = QPushButton("✕")
+        hide_btn.setFixedSize(22, 22)
+        hide_btn.setToolTip("Aus dieser Ansicht entfernen (Eintrag bleibt in der MA-Doku erhalten)")
+        hide_btn.setStyleSheet(
+            "QPushButton{background:#eee;border:none;border-radius:3px;"
+            "color:#a00;font-weight:bold;font-size:11px;}"
+            "QPushButton:hover{background:#ffcccc;}"
+        )
+        hide_btn.clicked.connect(lambda: (row_frame.setParent(None), row_frame.deleteLater()))
         row_layout.addWidget(name_lbl)
         row_layout.addWidget(info_lbl)
         row_layout.addStretch()
         row_layout.addWidget(src_lbl)
+        row_layout.addWidget(hide_btn)
         self._verspaetungen_section_layout.addWidget(row_frame)
 
     # ── Fahrzeug-Sektion dynamisch aufbauen ────────────────────────────────────

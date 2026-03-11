@@ -1024,10 +1024,10 @@ def export_patient_word(
 
     # ── Seitenränder ────────────────────────────────────────────────────────
     for sec in doc.sections:
-        sec.top_margin    = Cm(1.8)
-        sec.bottom_margin = Cm(1.8)
-        sec.left_margin   = Cm(2.0)
-        sec.right_margin  = Cm(2.0)
+        sec.top_margin    = Cm(1.0)
+        sec.bottom_margin = Cm(1.0)
+        sec.left_margin   = Cm(1.5)
+        sec.right_margin  = Cm(1.5)
 
     DRK_ROT  = RGBColor(0xC8, 0x10, 0x2E)
     DRK_BLAU = RGBColor(0x15, 0x65, 0xA8)
@@ -1045,21 +1045,27 @@ def export_patient_word(
         tbl = doc.add_table(rows=1, cols=2)
         tbl.style = "Table Grid"
         lc = tbl.rows[0].cells[0]
-        run_l = lc.paragraphs[0].add_run(label)
+        lp = lc.paragraphs[0]
+        lp.paragraph_format.space_before = Pt(0)
+        lp.paragraph_format.space_after  = Pt(0)
+        run_l = lp.add_run(label)
         run_l.bold = True
-        run_l.font.size = Pt(9)
+        run_l.font.size = Pt(8)
         _set_cell_bg(lc, "E8EFF8")
         vc = tbl.rows[0].cells[1]
+        vp = vc.paragraphs[0]
+        vp.paragraph_format.space_before = Pt(0)
+        vp.paragraph_format.space_after  = Pt(0)
         wert_str = str(wert).strip() if (wert is not None and str(wert).strip()) else "—"
-        vc.paragraphs[0].add_run(wert_str).font.size = Pt(9)
+        vp.add_run(wert_str).font.size = Pt(8)
 
     def _abschnitt(titel: str):
         p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(8)
+        p.paragraph_format.space_before = Pt(3)
         p.paragraph_format.space_after  = Pt(0)
         run = p.add_run(f"  {titel}")
         run.bold = True
-        run.font.size = Pt(10)
+        run.font.size = Pt(8)
         run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
         pPr = p._p.get_or_add_pPr()
         shd = OxmlElement("w:shd")
@@ -1071,32 +1077,43 @@ def export_patient_word(
     # ── Logo ─────────────────────────────────────────────────────────────────
     logo_pfad = os.path.join(BASE_DIR, "Daten", "Email", "Logo.jpg")
     if os.path.isfile(logo_pfad):
-        doc.add_picture(logo_pfad, width=Cm(4))
+        doc.add_picture(logo_pfad, width=Cm(3))
         doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        doc.paragraphs[-1].paragraph_format.space_before = Pt(0)
+        doc.paragraphs[-1].paragraph_format.space_after  = Pt(0)
 
     # ── Titel ─────────────────────────────────────────────────────────────────
     titel_p = doc.add_heading("Patientenprotokoll", level=1)
     titel_p.runs[0].font.color.rgb = DRK_ROT
+    titel_p.runs[0].font.size = Pt(13)
     titel_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    titel_p.paragraph_format.space_before = Pt(2)
+    titel_p.paragraph_format.space_after  = Pt(1)
 
     sub_p = doc.add_paragraph()
     sub_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    sub_p.paragraph_format.space_before = Pt(0)
+    sub_p.paragraph_format.space_after  = Pt(0)
     sub_run = sub_p.add_run("DRK Erste-Hilfe-Station – Flughafen Köln/Bonn (FKB)")
-    sub_run.font.size = Pt(10)
+    sub_run.font.size = Pt(8)
     sub_run.font.color.rgb = DRK_BLAU
 
     info_p = doc.add_paragraph()
     info_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    info_p.paragraph_format.space_before = Pt(0)
+    info_p.paragraph_format.space_after  = Pt(0)
     info_p.add_run(
         f"Datum: {patient.get('datum', '')}  |  Uhrzeit: {patient.get('uhrzeit', '')}  |  "
         f"Behandlungsdauer: {patient.get('behandlungsdauer', 0) or 0} Min."
-    ).font.size = Pt(9)
+    ).font.size = Pt(8)
 
     bg_jn = "Ja ⚠" if patient.get("arbeitsunfall") else "Nein"
     bg_p = doc.add_paragraph()
     bg_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    bg_p.paragraph_format.space_before = Pt(0)
+    bg_p.paragraph_format.space_after  = Pt(0)
     bg_run = bg_p.add_run(f"BG-Fall / Arbeitsunfall: {bg_jn}")
-    bg_run.font.size = Pt(9)
+    bg_run.font.size = Pt(8)
     bg_run.bold = True
     if patient.get("arbeitsunfall"):
         bg_run.font.color.rgb = RGBColor(0xB0, 0x00, 0x00)
@@ -1134,9 +1151,12 @@ def export_patient_word(
     mon_tbl.style = "Table Grid"
     for _i, _h in enumerate(["BZ (mg/dl)", "RR (mmHg)", "SpO2 (%)", "HF (bpm)"]):
         _c = mon_tbl.rows[0].cells[_i]
-        _rc = _c.paragraphs[0].add_run(_h)
+        _cp = _c.paragraphs[0]
+        _cp.paragraph_format.space_before = Pt(0)
+        _cp.paragraph_format.space_after  = Pt(0)
+        _rc = _cp.add_run(_h)
         _rc.bold = True
-        _rc.font.size = Pt(9)
+        _rc.font.size = Pt(8)
         _set_cell_bg(_c, "E8EFF8")
     for _i, _v in enumerate([
         patient.get("monitoring_bz",   "") or "—",
@@ -1144,7 +1164,10 @@ def export_patient_word(
         patient.get("monitoring_spo2", "") or "—",
         patient.get("monitoring_hf",   "") or "—",
     ]):
-        mon_tbl.rows[1].cells[_i].paragraphs[0].add_run(_v).font.size = Pt(9)
+        _vp = mon_tbl.rows[1].cells[_i].paragraphs[0]
+        _vp.paragraph_format.space_before = Pt(0)
+        _vp.paragraph_format.space_after  = Pt(0)
+        _vp.add_run(_v).font.size = Pt(8)
 
     # ── 6. Vorerkrankungen & Medikamente ──────────────────────────────────────
     _abschnitt("6 │ Vorerkrankungen & Medikamente des Patienten")
@@ -1159,21 +1182,27 @@ def export_patient_word(
     _med_liste = medikamente or []
     if _med_liste:
         _abschnitt_med = doc.add_paragraph()
-        _abschnitt_med.paragraph_format.space_before = Pt(4)
+        _abschnitt_med.paragraph_format.space_before = Pt(2)
+        _abschnitt_med.paragraph_format.space_after  = Pt(0)
         _abschnitt_med.add_run("  Medikamente gegeben:").bold = True
-        _abschnitt_med.runs[0].font.size = Pt(9)
+        _abschnitt_med.runs[0].font.size = Pt(8)
         med_word_tbl = doc.add_table(rows=1 + len(_med_liste), cols=3)
         med_word_tbl.style = "Table Grid"
         for _i, _h in enumerate(["Medikament", "Dosis", "Applikation"]):
             _cw = med_word_tbl.rows[0].cells[_i]
-            _rcw = _cw.paragraphs[0].add_run(_h)
+            _cwp = _cw.paragraphs[0]
+            _cwp.paragraph_format.space_before = Pt(0)
+            _cwp.paragraph_format.space_after  = Pt(0)
+            _rcw = _cwp.add_run(_h)
             _rcw.bold = True
-            _rcw.font.size = Pt(9)
+            _rcw.font.size = Pt(8)
             _set_cell_bg(_cw, "E8EFF8")
         for _ri, _m in enumerate(_med_liste, start=1):
-            med_word_tbl.rows[_ri].cells[0].paragraphs[0].add_run(_m.get("medikament", "")).font.size = Pt(9)
-            med_word_tbl.rows[_ri].cells[1].paragraphs[0].add_run(_m.get("dosis", "") or "—").font.size = Pt(9)
-            med_word_tbl.rows[_ri].cells[2].paragraphs[0].add_run(_m.get("applikation", "") or "—").font.size = Pt(9)
+            for _ci, _val in enumerate([_m.get("medikament", ""), _m.get("dosis", "") or "—", _m.get("applikation", "") or "—"]):
+                _rp = med_word_tbl.rows[_ri].cells[_ci].paragraphs[0]
+                _rp.paragraph_format.space_before = Pt(0)
+                _rp.paragraph_format.space_after  = Pt(0)
+                _rp.add_run(_val).font.size = Pt(8)
     else:
         _row("Medikamentengabe", "Nein")
 
@@ -1184,17 +1213,24 @@ def export_patient_word(
         vm_tbl.style = "Table Grid"
         for _i, _h in enumerate(["Material", "Menge", "Einheit"]):
             _c2 = vm_tbl.rows[0].cells[_i]
-            _rc2 = _c2.paragraphs[0].add_run(_h)
+            _c2p = _c2.paragraphs[0]
+            _c2p.paragraph_format.space_before = Pt(0)
+            _c2p.paragraph_format.space_after  = Pt(0)
+            _rc2 = _c2p.add_run(_h)
             _rc2.bold = True
-            _rc2.font.size = Pt(9)
+            _rc2.font.size = Pt(8)
             _set_cell_bg(_c2, "E8EFF8")
         for _ri, _m in enumerate(verbrauchsmaterial, start=1):
-            vm_tbl.rows[_ri].cells[0].paragraphs[0].add_run(_m.get("material", "")).font.size = Pt(9)
-            vm_tbl.rows[_ri].cells[1].paragraphs[0].add_run(str(_m.get("menge", ""))).font.size = Pt(9)
-            vm_tbl.rows[_ri].cells[2].paragraphs[0].add_run(_m.get("einheit", "")).font.size = Pt(9)
+            for _ci, _val in enumerate([_m.get("material", ""), str(_m.get("menge", "")), _m.get("einheit", "")]):
+                _rp2 = vm_tbl.rows[_ri].cells[_ci].paragraphs[0]
+                _rp2.paragraph_format.space_before = Pt(0)
+                _rp2.paragraph_format.space_after  = Pt(0)
+                _rp2.add_run(_val).font.size = Pt(8)
     else:
         p_vm = doc.add_paragraph("Kein Verbrauchsmaterial erfasst.")
-        p_vm.runs[0].font.size = Pt(9)
+        p_vm.paragraph_format.space_before = Pt(0)
+        p_vm.paragraph_format.space_after  = Pt(0)
+        p_vm.runs[0].font.size = Pt(8)
 
     # ── 9. Arbeitsunfall / BG-Fall ────────────────────────────────────────────
     if patient.get("arbeitsunfall"):
@@ -1213,14 +1249,15 @@ def export_patient_word(
         _row("Bemerkung", patient.get("bemerkung", ""))
 
     # ── Fußzeile ──────────────────────────────────────────────────────────────
-    doc.add_paragraph()
     fuss_p = doc.add_paragraph()
     fuss_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    fuss_p.paragraph_format.space_before = Pt(3)
+    fuss_p.paragraph_format.space_after  = Pt(0)
     fuss_r = fuss_p.add_run(
         f"Erstellt am {datetime.now().strftime('%d.%m.%Y %H:%M')}  –  "
         "DRK-Kreisverband Köln e.V. | Erste-Hilfe-Station FKB"
     )
-    fuss_r.font.size = Pt(8)
+    fuss_r.font.size = Pt(7)
     fuss_r.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
 
     doc.save(ziel_pfad)

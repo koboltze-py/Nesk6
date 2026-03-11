@@ -31,6 +31,7 @@ from gui.mitarbeiter            import MitarbeiterHauptWidget
 from gui.hilfe_dialog           import HilfeDialog
 from gui.dienstliches           import DienstlichesWidget
 from gui.telefonnummern         import TelefonnummernWidget
+from gui.call_transcription     import CallTranscriptionWidget
 
 
 NAV_ITEMS = [
@@ -45,9 +46,10 @@ NAV_ITEMS = [
     ("🕐", "Code 19",          8),
     ("🖨️", "Ma. Ausdrucke",   9),
     ("🤒", "Krankmeldungen",  10),
-    ("�", "Telefonnummern",  11),
-    ("💾", "Backup",          12),
-    ("⚙️",  "Einstellungen",  13),
+    ("📞", "Telefonnummern",  11),
+    ("♿", "Call Transcription", 12),
+    ("💾", "Backup",          13),
+    ("⚙️",  "Einstellungen",  14),
 ]
 
 NAV_TOOLTIPS = [
@@ -63,6 +65,7 @@ NAV_TOOLTIPS = [
     "Vordrucke öffnen und drucken (Ordner: Daten/Vordrucke)",
     "Krankmeldungsformulare öffnen (Ordner: 03_Krankmeldungen)",
     "Telefonnummern-Verzeichnis: FKB Gate-/Check-In-Nummern und DRK-Kontakte",
+    "Anrufprotokoll: Anrufinhalte mit Textbausteinen schnell erfassen und verwalten",
     "Datensicherung erstellen und wiederherstellen",
     "App-Einstellungen, Pfade und E-Mobby-Fahrerliste",
 ]
@@ -244,6 +247,7 @@ class MainWindow(QMainWindow):
 
         self._telefonnummern_page = TelefonnummernWidget()
 
+        self._call_transcription_page = CallTranscriptionWidget()
         self._backup_page        = self._placeholder_page("💾 Backup", "Backup-Verwaltung wird implementiert.")
         self._settings_page      = EinstellungenWidget()
 
@@ -254,6 +258,7 @@ class MainWindow(QMainWindow):
                      self._fahrzeuge_page, self._code19_page,
                      self._ausdrucke_page, self._krankmeldungen_page,
                      self._telefonnummern_page,
+                     self._call_transcription_page,
                      self._backup_page, self._settings_page]:
             self._stack.addWidget(page)
 
@@ -294,6 +299,7 @@ class MainWindow(QMainWindow):
             9: self._ausdrucke_page.refresh,
             10: self._krankmeldungen_page.refresh,
             11: self._telefonnummern_page.refresh,
+            12: self._call_transcription_page.refresh,
         }
         if index in page_map:
             QTimer.singleShot(0, page_map[index])
