@@ -1884,30 +1884,28 @@ class UebergabeWidget(QWidget):
 
         # ── Verspätete Mitarbeiter – Zeitraumfilter ───────────────────────────
         try:
-            alle_vsp = lade_verspaetungen(pid) if pid else []
+            _legacy_vsp = lade_verspaetungen(pid) if pid else []
         except Exception:
-            alle_vsp = []
-        # Aus verspaetungen.db (MA-Doku): nur aktueller Tag (kein Vortag)
+            _legacy_vsp = []
+        # DB-Einträge bevorzugen (haben Datum) – legacy nur wenn kein DB-Eintrag vorhanden
         try:
             _datum_iso = self._f_datum.date().toString("yyyy-MM-dd")
             _db_vsp_heute = lade_vsp_aus_db(_datum_iso)
-            # Dedup: DB-Einträge nicht hinzufügen, wenn (name, soll) bereits in gespeicherten Einträgen
-            _saved_keys = set()
-            for _sv in alle_vsp:
-                if isinstance(_sv, dict):
-                    _saved_keys.add((_sv.get("mitarbeiter", ""), _sv.get("soll_zeit", "")))
-                else:
-                    try:
-                        _saved_keys.add((_sv[0], _sv[1]))
-                    except Exception:
-                        pass
-            _db_vsp_heute = [
-                _e for _e in _db_vsp_heute
-                if (_e.get("mitarbeiter", ""), _e.get("dienstbeginn", "")) not in _saved_keys
+            # Schlüsselmenge der DB-Einträge (mitarbeiter, dienstbeginn)
+            _db_keys = {
+                (_e.get("mitarbeiter", ""), _e.get("dienstbeginn", ""))
+                for _e in _db_vsp_heute
+            }
+            # Legacy-Einträge nur behalten wenn KEIN DB-Eintrag diese Person/Zeit abdeckt
+            _legacy_only = [
+                _sv for _sv in _legacy_vsp
+                if ((_sv.get("mitarbeiter", "") if isinstance(_sv, dict) else _sv[0]),
+                    (_sv.get("soll_zeit", "")   if isinstance(_sv, dict) else _sv[1]))
+                   not in _db_keys
             ]
-            alle_vsp = _db_vsp_heute + alle_vsp
+            alle_vsp = _db_vsp_heute + _legacy_only
         except Exception:
-            pass
+            alle_vsp = _legacy_vsp
 
         def _vsp_label(e):
             _name = e["mitarbeiter"] if isinstance(e, dict) else e[0]
