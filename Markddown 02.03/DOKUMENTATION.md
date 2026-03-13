@@ -1,6 +1,6 @@
 # Nesk3 – Technische Dokumentation
 
-**Stand:** 12.03.2026 – v3.4.2
+**Stand:** 12.03.2026 – v3.4.3 / Version 1.1
 **Anwendung:** Nesk3 – DRK Flughafen Köln/Bonn
 **Zweck:** Dienstplan, Stärkemeldung, Mitarbeiterverwaltung, Mitarbeiter-Dokumente, Stellungnahmen-DB, Patienten-Protokoll, Telefonnummern, Hilfe-Screenshot-Galerie
 
@@ -59,9 +59,17 @@ Nesk3/
 
 ## 2. Backup-System
 
+### ZIP-Backup (manuell)
 - `create_zip_backup()` → `Backup Data/Nesk3_backup_YYYYMMDD_HHMMSS.zip`
 - Ausschlüsse: `__pycache__`, `.git`, `Backup Data`, `backup`, `build_tmp`, `Exe`
 - Größe: ~8–12 MB
+
+### DB-Auto-Backup (App-Start)
+- Funktion: `_db_startup_backup()` in `main.py`
+- Zielordner: `database SQL/Backup Data/db_backups/YYYY-MM-DD/`
+- Dateinamen: `<datenbankname>_HHMMSS.db`
+- **Max. 5 Backups** je Datenbank pro Tag (älteste werden automatisch gelöscht)
+- **Max. 7 Tages-Ordner** – überschüssige Ordner werden beim App-Start gelöscht
 
 ---
 
@@ -237,6 +245,14 @@ Bestehende Sektionen: Protokolldaten, Fahrzeugstatus, Fahrzeugschäden, Handys/G
   [Link zur lokalen Web-Ansicht]
   Referenz: Stellungnahme #42 – Max Mustermann – 02.03.2026
   ```
+
+### Verspätungs-Sektion (`_rebuild_verspaetungen_section`)
+
+- **Blaue Einträge** (aus MA-Dokumentation): werden **immer** angezeigt – auch nach Protokoll-Speichern
+- **Nachtdienst**: Vortag-Verspätungen werden nicht mehr automatisch geladen
+- **Manuell hinzufügen** (➕): Dialog mit Datum-Feld (QDateEdit), Sollzeit editierbar → Eintrag direkt in `verspaetungen.db` gespeichert
+- **Deduplication**: `db_eintraege` nach `(mitarbeiter, dienstbeginn)` via `_seen_db`-Set
+- **E-Mail**: Datum (📅 dd.MM.yyyy) wird pro Verspätungseintrag in die E-Mail übertragen; DB-Einträge werden gegenüber Legacy-Tupeln bevorzugt
 
 ---
 

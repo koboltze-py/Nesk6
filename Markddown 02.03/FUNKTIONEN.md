@@ -1,6 +1,6 @@
 ﻿# Nesk3 – Vollständige Funktionsübersicht
 
-**Stand:** 12.03.2026 – v3.4.2
+**Stand:** 12.03.2026 – v3.4.3 / Version 1.1
 
 ---
 

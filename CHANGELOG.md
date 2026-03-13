@@ -5,6 +5,29 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
+## 12.03.2026 – v3.4.3 / Version 1.1
+
+### Übergabe – Verspätungen komplett überarbeitet
+
+#### `gui/uebergabe.py`
+- **Nachtdienst**: Vortag-Verspätungen werden nicht mehr automatisch angezeigt (weder im Formular noch in der E-Mail)
+- **Blaue Einträge** aus Mitarbeiter-Dokumentation werden jetzt **immer** angezeigt – auch nach dem Speichern eines Protokolls
+- **Manuell hinzufügen** (➕-Button) speichert direkt in `verspaetungen.db` inkl. Datum-Feld
+- **Datum-Feld** im Erfassungsdialog: Datum des Vorfalls auswählbar (Standard = Protokolldatum)
+- **Sollzeit editierbar** mit oranger Warnmeldung bei manueller Änderung
+- **Bugfix Dopplungen**: `db_eintraege` nach `(mitarbeiter, dienstbeginn)` dedupliziert
+- **E-Mail**: Datum (📅 dd.MM.yyyy) pro Verspätungseintrag in der E-Mail
+- **E-Mail**: DB-Einträge werden bevorzugt (haben Datum), Legacy-Tupel nur als Fallback
+
+### Backup-System
+
+#### `main.py`
+- **Neue Backup-Struktur**: Tages-Ordner `db_backups/YYYY-MM-DD/` statt flacher Dateiablage
+- **Max. 5 Backups** je Datenbank pro Tag (automatische Bereinigung)
+- **Max. 7 Tages-Ordner** – ältere Ordner beim App-Start automatisch gelöscht
+
+---
+
 ## 12.03.2026 – v3.4.2
 
 ### Übergabe – Verspätungs-Bugfixes & Verbesserungen
