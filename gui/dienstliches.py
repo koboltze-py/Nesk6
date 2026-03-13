@@ -711,6 +711,156 @@ def export_einsaetze_excel(
     return ziel_pfad
 
 
+_PATIENTEN_EXPORT_DIR = os.path.join(BASE_DIR, "Daten", "Pat. Station")
+
+
+def export_patienten_excel(
+    eintraege: list[dict],
+    ziel_pfad: str | None = None,
+    titel_zeitraum: str = "",
+) -> str:
+    """
+    Exportiert eine Liste von Patienten-Einträgen als Excel-Datei.
+    Gibt den tatsächlichen Speicherpfad zurück.
+    ziel_pfad: vollständiger Pfad inkl. Dateiname; None = Standardordner.
+    """
+    try:
+        import openpyxl
+        from openpyxl.styles import (
+            Font, PatternFill, Alignment, Border, Side
+        )
+        from openpyxl.utils import get_column_letter
+    except ImportError as e:
+        raise ImportError(
+            "openpyxl ist nicht installiert. Bitte 'pip install openpyxl' ausführen."
+        ) from e
+
+    os.makedirs(_PATIENTEN_EXPORT_DIR, exist_ok=True)
+
+    if not ziel_pfad:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dateiname = f"Patienten_Export_{ts}.xlsx"
+        ziel_pfad = os.path.join(_PATIENTEN_EXPORT_DIR, dateiname)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Patienten"
+
+    # ── Farben / Stile ────────────────────────────────────────────────────
+    rot_drk   = "C8102E"
+    hell_grau = "F2F2F2"
+    thin = Side(style="thin", color="AAAAAA")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    hdr_font  = Font(bold=True, color="FFFFFF", size=11)
+    hdr_fill  = PatternFill("solid", fgColor=rot_drk)
+    hdr_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    NUM_COLS = 15
+
+    # ── Titel-Zeile ────────────────────────────────────────────────────────
+    ws.merge_cells(f"A1:{get_column_letter(NUM_COLS)}1")
+    titel_cell = ws["A1"]
+    titel_text = "Patienten DRK Station – FKB (DRK)"
+    if titel_zeitraum:
+        titel_text += f"  |  {titel_zeitraum}"
+    titel_cell.value = titel_text
+    titel_cell.font  = Font(bold=True, size=13, color="FFFFFF")
+    titel_cell.fill  = PatternFill("solid", fgColor=rot_drk)
+    titel_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 28
+
+    # ── Untertitel ─────────────────────────────────────────────────────────
+    ws.merge_cells(f"A2:{get_column_letter(NUM_COLS)}2")
+    sub = ws["A2"]
+    sub.value = (
+        f"Erstellt am {datetime.now().strftime('%d.%m.%Y %H:%M')}  –  "
+        f"{len(eintraege)} Patient(en)"
+    )
+    sub.font      = Font(italic=True, size=9, color="666666")
+    sub.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 16
+
+    # ── Spaltenüberschriften ───────────────────────────────────────────────
+    headers = [
+        "Nr.", "Datum", "Uhrzeit", "Dauer\n(Min.)",
+        "Typ", "Patient", "Alter", "Geschlecht",
+        "Beschwerde / Symptome", "Diagnose / Maßnahmen",
+        "DRK MA 1", "DRK MA 2", "Weitergeleitet", "BG-Fall", "Bemerkung"
+    ]
+    col_widths = [6, 13, 10, 10, 16, 24, 8, 12, 36, 36, 20, 20, 16, 10, 30]
+
+    for col, (h, w) in enumerate(zip(headers, col_widths), start=1):
+        cell = ws.cell(row=3, column=col, value=h)
+        cell.font      = hdr_font
+        cell.fill      = hdr_fill
+        cell.alignment = hdr_align
+        cell.border    = border
+        ws.column_dimensions[get_column_letter(col)].width = w
+    ws.row_dimensions[3].height = 32
+
+    # ── Datenzeilen ────────────────────────────────────────────────────────
+    for row_idx, p in enumerate(eintraege, start=1):
+        row_num = row_idx + 3
+        bg = "E8F5E9" if row_idx % 2 == 0 else "FFFFFF"
+        row_fill = PatternFill("solid", fgColor=bg)
+
+        beschwerde = p.get("beschwerde_art", "") or p.get("symptome", "")
+        massnahmen = p.get("massnahmen", "")
+        if p.get("diagnose"):
+            massnahmen = (p["diagnose"] + ("  |  " + massnahmen if massnahmen else ""))
+        dauer = p.get("behandlungsdauer", 0) or 0
+        bg_fall = "Ja" if p.get("arbeitsunfall") else "Nein"
+        name = p.get("patient_name", "")
+        abtlg = p.get("patient_abteilung", "")
+        display = f"{name} ({abtlg})" if name and abtlg else (name or "—")
+
+        values = [
+            row_idx,
+            p.get("datum", ""),
+            p.get("uhrzeit", ""),
+            dauer if dauer else "",
+            p.get("patient_typ", "") or "—",
+            display,
+            p.get("patient_alter", "") or "",
+            p.get("geschlecht", "") or "",
+            beschwerde,
+            massnahmen,
+            p.get("drk_ma1", "") or "",
+            p.get("drk_ma2", "") or "",
+            p.get("weitergeleitet", "") or "—",
+            bg_fall,
+            p.get("bemerkung", "") or "",
+        ]
+        for col, val in enumerate(values, start=1):
+            cell = ws.cell(row=row_num, column=col, value=val)
+            cell.fill   = row_fill
+            cell.border = border
+            cell.alignment = Alignment(vertical="center", wrap_text=(col in (9, 10, 15)))
+            if col in (1, 3, 4, 7, 13, 14):
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[row_num].height = 16
+
+    # ── Statistik-Zeile ────────────────────────────────────────────────────
+    stat_row = len(eintraege) + 5
+    ws.merge_cells(f"A{stat_row}:{get_column_letter(NUM_COLS)}{stat_row}")
+    stat_cell = ws.cell(row=stat_row, column=1)
+    bg_anzahl = sum(1 for p in eintraege if p.get("arbeitsunfall"))
+    stat_cell.value = (
+        f"Gesamt: {len(eintraege)} Patient(en)   ⚠ BG-Fälle: {bg_anzahl}"
+    )
+    stat_cell.font  = Font(bold=True, size=10)
+    stat_cell.fill  = PatternFill("solid", fgColor="E3F2FD")
+    stat_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[stat_row].height = 20
+
+    # ── Zeile einfrieren ────────────────────────────────────────────────────
+    ws.freeze_panes = "A4"
+
+    wb.save(ziel_pfad)
+    return ziel_pfad
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 #  Hilfsstile
 # ──────────────────────────────────────────────────────────────────────────────
@@ -2066,6 +2216,25 @@ class _PatientenTab(QWidget):
         self._btn_mail.clicked.connect(self._mail_protokoll)
         btn_row.addWidget(self._btn_mail)
 
+        # Trennstrich
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setStyleSheet("color:#ccc;")
+        btn_row.addWidget(sep)
+
+        self._btn_excel = _btn("📈  Excel exportieren", "#1565a8", "#0d47a1")
+        self._btn_excel.setToolTip(
+            f"Aktuelle Ansicht als Excel speichern\n"
+            f"Standard-Ordner: Daten/Pat. Station"
+        )
+        self._btn_excel.clicked.connect(self._excel_exportieren)
+        btn_row.addWidget(self._btn_excel)
+
+        self._btn_excel_wo = _btn_light("📂  Speicherort wählen")
+        self._btn_excel_wo.setToolTip("Excel exportieren und Speicherort manuell wählen")
+        self._btn_excel_wo.clicked.connect(lambda: self._excel_exportieren(ask_path=True))
+        btn_row.addWidget(self._btn_excel_wo)
+
         btn_row.addStretch()
         self._treffer_lbl = QLabel()
         self._treffer_lbl.setStyleSheet("color:#666; font-size:11px;")
@@ -2333,6 +2502,47 @@ class _PatientenTab(QWidget):
             )
         except Exception as exc:
             QMessageBox.critical(self, "Fehler beim E-Mail-Versand", str(exc))
+
+    def _excel_exportieren(self, ask_path: bool = False):
+        if not self._eintraege:
+            QMessageBox.information(self, "Kein Inhalt", "Keine Einträge zur Ansicht vorhanden.")
+            return
+
+        ziel = None
+        if ask_path:
+            from PySide6.QtWidgets import QFileDialog
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            vorschlag = os.path.join(_PATIENTEN_EXPORT_DIR, f"Patienten_Export_{ts}.xlsx")
+            os.makedirs(_PATIENTEN_EXPORT_DIR, exist_ok=True)
+            ziel, _ = QFileDialog.getSaveFileName(
+                self,
+                "Excel-Datei speichern",
+                vorschlag,
+                "Excel-Dateien (*.xlsx)",
+            )
+            if not ziel:
+                return
+
+        try:
+            pfad = export_patienten_excel(self._eintraege, ziel_pfad=ziel)
+        except ImportError as e:
+            QMessageBox.critical(self, "Modul fehlt", str(e))
+            return
+        except Exception as exc:
+            QMessageBox.critical(self, "Export-Fehler", f"Fehler beim Exportieren:\n{exc}")
+            return
+
+        antwort = QMessageBox.question(
+            self,
+            "Excel gespeichert",
+            f"Excel wurde erfolgreich gespeichert:\n\n{pfad}\n\nDatei jetzt öffnen?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if antwort == QMessageBox.StandardButton.Yes:
+            import subprocess
+            subprocess.Popen(["explorer", pfad], shell=False)
+
+        return pfad
 
 
 # ──────────────────────────────────────────────────────────────────────────────

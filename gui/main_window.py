@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QPushButton, QLabel, QStackedWidget, QFrame, QSizePolicy
+    QPushButton, QLabel, QStackedWidget, QFrame, QSizePolicy, QMessageBox
 )
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QFont, QColor, QPixmap
@@ -123,6 +123,7 @@ class MainWindow(QMainWindow):
         self._nav_buttons: list[SidebarButton] = []
         self._build_ui()
         self._navigate(0)
+        QTimer.singleShot(800, self._check_termine_startup)
 
     # ── UI aufbauen ────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -185,12 +186,28 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
 
+        # Termin-Badge (über Hilfe-Button)  
+        self._termin_badge = QLabel("🔔  Terminhinweis")
+        self._termin_badge.setWordWrap(True)
+        self._termin_badge.setStyleSheet("""
+            QLabel {
+                background-color: #e67e22;
+                color: white;
+                border-radius: 4px;
+                padding: 5px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """)
+        self._termin_badge.setVisible(False)
+        layout.addWidget(self._termin_badge)
+
         # Hilfe-Button
-        hilfe_btn = QPushButton("❓  Hilfe")
-        hilfe_btn.setMinimumHeight(36)
-        hilfe_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        hilfe_btn.setToolTip("Bedienungsanleitung und Übersicht aller Funktionen öffnen")
-        hilfe_btn.setStyleSheet("""
+        self._hilfe_btn = QPushButton("❓  Hilfe")
+        self._hilfe_btn.setMinimumHeight(36)
+        self._hilfe_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._hilfe_btn.setToolTip("Bedienungsanleitung und Übersicht aller Funktionen öffnen")
+        self._hilfe_btn.setStyleSheet("""
             QPushButton {
                 background-color: rgba(255,255,255,0.10);
                 color: #cdd5e0;
@@ -205,8 +222,8 @@ class MainWindow(QMainWindow):
                 color: white;
             }
         """)
-        hilfe_btn.clicked.connect(lambda: HilfeDialog(self).exec())
-        layout.addWidget(hilfe_btn)
+        self._hilfe_btn.clicked.connect(lambda: HilfeDialog(self).exec())
+        layout.addWidget(self._hilfe_btn)
 
         # Version unten
         ver_lbl = QLabel(f"v{APP_VERSION}")
@@ -278,6 +295,60 @@ class MainWindow(QMainWindow):
         layout.addWidget(lbl_title)
         layout.addWidget(lbl_msg)
         return w
+
+    # ── Fahrzeug-Termin-Check ──────────────────────────────────────────────────
+
+    def _check_termine_startup(self):
+        """
+        Prüft Fahrzeug-Termine für heute und morgen.
+        Zeigt Badge an und öffnet Popup wenn Termine morgen anstehen.
+        """
+        try:
+            termine = self._dashboard_page.get_termine()
+        except Exception:
+            return
+
+        from PySide6.QtCore import QDate
+        today = QDate.currentDate()
+        morgen = today.addDays(1)
+        today_str  = today.toString("yyyy-MM-dd")
+        morgen_str = morgen.toString("yyyy-MM-dd")
+
+        heute_termine  = [t for t in termine if t.get("datum") == today_str]
+        morgen_termine = [t for t in termine if t.get("datum") == morgen_str]
+        badge_termine  = heute_termine + morgen_termine
+
+        # Badge anzeigen/verstecken
+        if badge_termine:
+            teile = []
+            if heute_termine:
+                teile.append(f"{len(heute_termine)} Termin(e) heute")
+            if morgen_termine:
+                teile.append(f"{len(morgen_termine)} Termin(e) morgen")
+            self._termin_badge.setText("🔔  " + "  |  ".join(teile))
+            self._termin_badge.setVisible(True)
+        else:
+            self._termin_badge.setVisible(False)
+
+        # Popup wenn Termine morgen
+        if morgen_termine:
+            zeilen = []
+            for t in morgen_termine:
+                kz = t.get("kennzeichen", "?")
+                titel = t.get("titel", "") or t.get("typ", "")
+                uhr = t.get("uhrzeit", "")
+                uhr_txt = f"  {uhr}" if uhr else ""
+                zeilen.append(f"• [{kz}]{uhr_txt}  {titel}")
+            msg = (
+                f"Morgen ({morgen.toString('dd.MM.yyyy')}) stehen "
+                f"{len(morgen_termine)} Fahrzeug-Termin(e) an:\n\n"
+                + "\n".join(zeilen)
+            )
+            QMessageBox.information(
+                self,
+                "🚗  Fahrzeug-Termine morgen",
+                msg,
+            )
 
     # ── Navigation ─────────────────────────────────────────────────────────────
     def _navigate(self, index: int):

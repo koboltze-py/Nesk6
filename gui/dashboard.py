@@ -1,15 +1,16 @@
 """
 Dashboard-Widget
-Zeigt Statistiken und Übersichten
+Zeigt Statistiken, Kalender und Fahrzeug-Termine
 """
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout, QMessageBox
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout,
+    QMessageBox, QCalendarWidget, QScrollArea, QSizePolicy
 )
-from PySide6.QtCore import Qt, QTimer, QEvent
-from PySide6.QtGui import QFont, QPainter, QLinearGradient, QColor
+from PySide6.QtCore import Qt, QTimer, QDate, QTime
+from PySide6.QtGui import QFont, QPainter, QLinearGradient, QColor, QTextCharFormat
 
 from config import FIORI_BLUE, FIORI_TEXT, FIORI_WHITE, FIORI_SUCCESS, FIORI_WARNING
 
@@ -200,60 +201,342 @@ class FlugzeugWidget(QFrame):
 class DashboardWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._termine: list[dict] = []
         self._build_ui()
+        # Uhr-Timer
+        self._uhr_timer = QTimer(self)
+        self._uhr_timer.timeout.connect(self._uhr_tick)
+        self._uhr_timer.start(1000)
+        self._uhr_tick()
+
+    # ── UI-Aufbau ─────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(20)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(20, 20, 20, 20)
+        outer.setSpacing(20)
 
-        # Titel
-        title = QLabel("🏠 Dashboard")
-        title.setFont(QFont("Arial", 22, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {FIORI_TEXT};")
-        layout.addWidget(title)
+        # ── Linke Seite: Kalender + Termine ───────────────────────────────
+        linke = QVBoxLayout()
+        linke.setSpacing(12)
 
-        subtitle = QLabel("Willkommen bei Nesk3 – DRK Flughafen Köln")
-        subtitle.setFont(QFont("Arial", 12))
-        subtitle.setStyleSheet("color: #888;")
-        layout.addWidget(subtitle)
+        titel = QLabel("🏠  Dashboard")
+        titel.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        titel.setStyleSheet(f"color: {FIORI_TEXT};")
+        linke.addWidget(titel)
+
+        sub = QLabel("Willkommen bei Nesk3 – DRK Flughafen Köln")
+        sub.setFont(QFont("Arial", 11))
+        sub.setStyleSheet("color: #888;")
+        linke.addWidget(sub)
+
+        # Kalender
+        self._kalender = QCalendarWidget()
+        self._kalender.setGridVisible(True)
+        self._kalender.setNavigationBarVisible(True)
+        self._kalender.setMinimumHeight(280)
+        self._kalender.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self._kalender.setStyleSheet("""
+            QCalendarWidget {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+            }
+            QCalendarWidget QWidget#qt_calendar_navigationbar {
+                background-color: #C8102E;
+                border-radius: 8px 8px 0 0;
+            }
+            QCalendarWidget QToolButton {
+                color: white;
+                background: transparent;
+                border: none;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 4px 8px;
+            }
+            QCalendarWidget QToolButton:hover {
+                background: rgba(255,255,255,0.20);
+                border-radius: 4px;
+            }
+            QCalendarWidget QSpinBox {
+                color: white;
+                background: transparent;
+                border: none;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QCalendarWidget QAbstractItemView {
+                background-color: white;
+                color: #333;
+                selection-background-color: #0078D4;
+                selection-color: white;
+                font-size: 12px;
+            }
+            QCalendarWidget QAbstractItemView:disabled {
+                color: #bbb;
+            }
+        """)
+        linke.addWidget(self._kalender)
+
+        # Termin-Liste
+        termin_hdr = QLabel("📌  Bevorstehende Fahrzeug-Termine")
+        termin_hdr.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        termin_hdr.setStyleSheet(f"color: {FIORI_TEXT};")
+        linke.addWidget(termin_hdr)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setMinimumHeight(140)
+        scroll.setMaximumHeight(260)
+        scroll.setStyleSheet("background: transparent;")
+        self._termin_container = QWidget()
+        self._termin_container.setStyleSheet("background: transparent;")
+        self._termin_layout = QVBoxLayout(self._termin_container)
+        self._termin_layout.setSpacing(5)
+        self._termin_layout.setContentsMargins(0, 0, 0, 0)
+        scroll.setWidget(self._termin_container)
+        linke.addWidget(scroll)
+
+        linke.addStretch()
+        outer.addLayout(linke, 6)
+
+        # ── Rechte Seite: Uhr + Statistiken + DB-Status ───────────────────
+        rechte = QVBoxLayout()
+        rechte.setSpacing(12)
+
+        # Digitaluhr
+        uhr_frame = QFrame()
+        uhr_frame.setStyleSheet("""
+            QFrame {
+                background: #354a5e;
+                border-radius: 10px;
+            }
+        """)
+        uhr_vlayout = QVBoxLayout(uhr_frame)
+        uhr_vlayout.setContentsMargins(16, 14, 16, 14)
+        uhr_vlayout.setSpacing(2)
+        self._uhr_lbl = QLabel("00:00:00")
+        self._uhr_lbl.setFont(QFont("Arial", 36, QFont.Weight.Bold))
+        self._uhr_lbl.setStyleSheet("color: white; border: none;")
+        self._uhr_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        uhr_vlayout.addWidget(self._uhr_lbl)
+        self._datum_lbl = QLabel()
+        self._datum_lbl.setFont(QFont("Arial", 11))
+        self._datum_lbl.setStyleSheet("color: #a0b4c8; border: none;")
+        self._datum_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        uhr_vlayout.addWidget(self._datum_lbl)
+        rechte.addWidget(uhr_frame)
 
         # Statistik-Karten
-        self._card_aktive  = StatCard("Aktive Mitarbeiter",     "–", "👥", FIORI_BLUE)
-        self._card_aktive.setToolTip("Anzahl der Mitarbeiter mit Status 'aktiv' in der Datenbank")
-        self._card_gesamt  = StatCard("Mitarbeiter gesamt",     "–", "🗂️",  "#555")
-        self._card_gesamt.setToolTip("Gesamtanzahl aller Mitarbeiter (aktiv + inaktiv)")
-        self._card_heute   = StatCard("Schichten heute",        "–", "📅", FIORI_SUCCESS)
-        self._card_heute.setToolTip("Anzahl der Schichten, die für den heutigen Tag eingetragen sind")
-        self._card_monat   = StatCard("Schichten diesen Monat", "–", "📊", FIORI_WARNING)
-        self._card_monat.setToolTip("Anzahl aller Schichten im aktuellen Kalendermonat")
+        self._card_aktive = StatCard("Aktive Mitarbeiter",     "–", "👥", FIORI_BLUE)
+        self._card_gesamt = StatCard("Mitarbeiter gesamt",     "–", "🗂️",  "#555")
+        self._card_heute  = StatCard("Schichten heute",        "–", "📅", FIORI_SUCCESS)
+        self._card_monat  = StatCard("Schichten diesen Monat", "–", "📊", FIORI_WARNING)
 
         grid = QGridLayout()
-        grid.setSpacing(16)
+        grid.setSpacing(12)
         grid.addWidget(self._card_aktive, 0, 0)
         grid.addWidget(self._card_gesamt, 0, 1)
         grid.addWidget(self._card_heute,  1, 0)
         grid.addWidget(self._card_monat,  1, 1)
-        layout.addLayout(grid)
+        rechte.addLayout(grid)
 
-        # Animiertes Flugzeug-Widget
+        # Animiertes Flugzeug-Widget (Easter Egg)
         self._flugzeug = FlugzeugWidget()
         self._flugzeug.setToolTip("Klicken für eine wichtige Durchsage vom Flughafen Köln/Bonn ✈")
-        layout.addWidget(self._flugzeug)
+        rechte.addWidget(self._flugzeug)
 
         # DB-Statusanzeige
         self._db_status_lbl = QLabel("🔄 Datenbankverbindung wird geprüft...")
-        self._db_status_lbl.setFont(QFont("Arial", 11))
+        self._db_status_lbl.setFont(QFont("Arial", 10))
         self._db_status_lbl.setStyleSheet(
-            "background-color: white; border-radius: 6px; padding: 10px 14px;"
+            "background-color: white; border-radius: 6px; padding: 8px 12px;"
         )
-        layout.addWidget(self._db_status_lbl)
+        rechte.addWidget(self._db_status_lbl)
 
-        layout.addStretch()
+        rechte.addStretch()
+        outer.addLayout(rechte, 4)
+
+    # ── Uhr ───────────────────────────────────────────────────────────────
+
+    def _uhr_tick(self):
+        now = QTime.currentTime()
+        self._uhr_lbl.setText(now.toString("HH:mm:ss"))
+        today = QDate.currentDate()
+        _WOCHENTAGE = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"]
+        _MONATE = ["","Januar","Februar","März","April","Mai","Juni",
+                   "Juli","August","September","Oktober","November","Dezember"]
+        wd = _WOCHENTAGE[today.dayOfWeek() - 1]
+        mo = _MONATE[today.month()]
+        self._datum_lbl.setText(f"{wd}, {today.day()}. {mo} {today.year()}")
+
+    # ── Fahrzeug-Termine laden ────────────────────────────────────────────
+
+    def _lade_fahrzeug_termine(self) -> list[dict]:
+        try:
+            from database.connection import db_cursor
+            with db_cursor() as cur:
+                cur.execute("""
+                    SELECT ft.id, ft.datum, ft.uhrzeit, ft.typ, ft.titel,
+                           ft.beschreibung, f.kennzeichen, f.typ AS fzg_typ
+                    FROM fahrzeug_termine ft
+                    JOIN fahrzeuge f ON f.id = ft.fahrzeug_id
+                    WHERE ft.datum >= date('now') AND ft.erledigt = 0
+                    ORDER BY ft.datum, ft.uhrzeit
+                    LIMIT 30
+                """)
+                return cur.fetchall()
+        except Exception:
+            return []
+
+    def _lade_statistics(self):
+        try:
+            from database.connection import db_cursor
+            with db_cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS n FROM mitarbeiter WHERE status='aktiv'")
+                row = cur.fetchone()
+                self._card_aktive.set_value(str(row["n"] if row else "–"))
+            with db_cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS n FROM mitarbeiter")
+                row = cur.fetchone()
+                self._card_gesamt.set_value(str(row["n"] if row else "–"))
+            with db_cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) AS n FROM dienstplan WHERE datum = date('now')"
+                )
+                row = cur.fetchone()
+                self._card_heute.set_value(str(row["n"] if row else "–"))
+            with db_cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) AS n FROM dienstplan "
+                    "WHERE strftime('%Y-%m', datum) = strftime('%Y-%m', 'now')"
+                )
+                row = cur.fetchone()
+                self._card_monat.set_value(str(row["n"] if row else "–"))
+        except Exception:
+            pass
+
+    # ── Kalender-Markierungen ─────────────────────────────────────────────
+
+    def _markiere_termine(self):
+        # Alle alten Markierungen zurücksetzen (letzter Monat ± 6 Monate)
+        today = QDate.currentDate()
+        leer = QTextCharFormat()
+        for offset in range(-6 * 30, 6 * 30):
+            d = today.addDays(offset)
+            self._kalender.setDateTextFormat(d, leer)
+
+        # Termine markieren
+        termin_fmt = QTextCharFormat()
+        termin_fmt.setBackground(QColor("#ffb74d"))
+        termin_fmt.setForeground(QColor("#7f3f00"))
+        termin_fmt.setFontWeight(700)
+
+        heute_fmt = QTextCharFormat()
+        heute_fmt.setBackground(QColor("#C8102E"))
+        heute_fmt.setForeground(QColor("white"))
+        heute_fmt.setFontWeight(700)
+
+        morgen_fmt = QTextCharFormat()
+        morgen_fmt.setBackground(QColor("#e53935"))
+        morgen_fmt.setForeground(QColor("white"))
+        morgen_fmt.setFontWeight(700)
+
+        morgen = today.addDays(1)
+
+        for t in self._termine:
+            datum_str = t.get("datum", "")
+            if not datum_str:
+                continue
+            parts = datum_str.split("-")
+            if len(parts) != 3:
+                continue
+            d = QDate(int(parts[0]), int(parts[1]), int(parts[2]))
+            if d == today:
+                self._kalender.setDateTextFormat(d, heute_fmt)
+            elif d == morgen:
+                self._kalender.setDateTextFormat(d, morgen_fmt)
+            else:
+                self._kalender.setDateTextFormat(d, termin_fmt)
+
+    # ── Termin-Liste aktualisieren ────────────────────────────────────────
+
+    def _zeige_termine_liste(self):
+        # Alte Einträge entfernen
+        while self._termin_layout.count():
+            item = self._termin_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        today = QDate.currentDate()
+        morgen = today.addDays(1)
+
+        if not self._termine:
+            leer = QLabel("✅  Keine bevorstehenden Fahrzeug-Termine")
+            leer.setStyleSheet("color: #888; font-size: 11px; padding: 4px 0;")
+            self._termin_layout.addWidget(leer)
+            return
+
+        for t in self._termine[:10]:
+            datum_str = t.get("datum", "")
+            if datum_str:
+                parts = datum_str.split("-")
+                if len(parts) == 3:
+                    d = QDate(int(parts[0]), int(parts[1]), int(parts[2]))
+                    datum_de = f"{d.day():02d}.{d.month():02d}.{d.year()}"
+                else:
+                    datum_de = datum_str
+            else:
+                datum_de = ""
+
+            kz = t.get("kennzeichen", "?")
+            titel = t.get("titel", "") or t.get("typ", "")
+            uhrzeit = t.get("uhrzeit", "") or ""
+
+            if datum_str:
+                parts = datum_str.split("-")
+                if len(parts) == 3:
+                    d_check = QDate(int(parts[0]), int(parts[1]), int(parts[2]))
+                    if d_check == today:
+                        farbe = "#C8102E"
+                        badge = " 🔴 HEUTE"
+                    elif d_check == morgen:
+                        farbe = "#e53935"
+                        badge = " 🟠 Morgen"
+                    else:
+                        farbe = "#1565a8"
+                        badge = ""
+                else:
+                    farbe = "#555"
+                    badge = ""
+            else:
+                farbe = "#555"
+                badge = ""
+
+            uhr_txt = f"  {uhrzeit}" if uhrzeit else ""
+            text = f"{datum_de}{uhr_txt}  [{kz}]  {titel}{badge}"
+
+            lbl = QLabel(text)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(
+                f"background: white; color: {farbe}; border-left: 3px solid {farbe};"
+                "border-radius: 4px; padding: 5px 8px; font-size: 12px;"
+            )
+            self._termin_layout.addWidget(lbl)
+
+        if len(self._termine) > 10:
+            mehr = QLabel(f"… und {len(self._termine) - 10} weitere Termine")
+            mehr.setStyleSheet("color: #888; font-size: 11px; padding: 2px 4px;")
+            self._termin_layout.addWidget(mehr)
+
+    # ── Refresh ───────────────────────────────────────────────────────────
 
     def refresh(self):
         """Aktualisiert alle Dashboard-Daten."""
-        # Datenbankverbindung testen
+        # DB-Verbindung testen
         try:
             from database.connection import test_connection
             ok, info = test_connection()
@@ -261,15 +544,25 @@ class DashboardWidget(QWidget):
                 self._db_status_lbl.setText(f"✅ Datenbank verbunden  |  {info[:60]}")
                 self._db_status_lbl.setStyleSheet(
                     "background-color: #e8f5e8; border-radius: 6px; "
-                    "border-left: 4px solid #107e3e; padding: 10px 14px; color: #107e3e;"
+                    "border-left: 4px solid #107e3e; padding: 8px 12px; color: #107e3e;"
                 )
             else:
                 self._db_status_lbl.setText(f"❌ Keine Datenbankverbindung: {info[:80]}")
                 self._db_status_lbl.setStyleSheet(
                     "background-color: #fce8e8; border-radius: 6px; "
-                    "border-left: 4px solid #bb0000; padding: 10px 14px; color: #bb0000;"
+                    "border-left: 4px solid #bb0000; padding: 8px 12px; color: #bb0000;"
                 )
         except Exception as e:
             self._db_status_lbl.setText(f"❌ Fehler: {e}")
 
-        # TODO: Statistiken laden (Implementierung folgt)
+        # Statistiken laden
+        self._lade_statistics()
+
+        # Fahrzeug-Termine laden
+        self._termine = self._lade_fahrzeug_termine()
+        self._markiere_termine()
+        self._zeige_termine_liste()
+
+    def get_termine(self) -> list[dict]:
+        """Gibt die zuletzt geladenen Fahrzeug-Termine zurück (für badge/popup)."""
+        return self._termine

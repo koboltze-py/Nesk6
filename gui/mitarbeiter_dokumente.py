@@ -2108,7 +2108,7 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._tabs.setTabVisible(1, is_stell)
         self._btn_verspaetung.setVisible(is_versp)
         self._btn_psa.setVisible(is_psa)
-        self._btn_neu.setVisible(not is_versp and not is_psa and not is_stell)
+        self._btn_neu.setVisible(not is_versp and not is_psa and not is_stell and not is_antrag)
         self._tabs.setTabVisible(0, not is_versp and not is_psa)  # Dateien-Tab ausblenden
         self._tabs.setTabVisible(2, is_versp)
         self._tabs.setTabVisible(3, is_psa)
