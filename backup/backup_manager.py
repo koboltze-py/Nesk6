@@ -658,10 +658,8 @@ def restore_from_zip(zip_path: str, ziel_ordner: str = None) -> dict:
 
 # Ordner relativ zum !Gemeinsam.26-Verzeichnis (= os.path.dirname(BASE_DIR))
 _DRK_BACKUP_ORDNER_NAMEN = [
-    "98_AVTECH_Fehler",
-    "98_Dispodienstplan",
-    "99_Druckvorlagen",
-    "101_ZÜP",
+    "00 Weihnachten",
+    "00_CODE 19",
     "01_Checklisten_Vorlage",
     "02_Sonderaufgaben",
     "03_Krankmeldungen",
@@ -678,6 +676,10 @@ _DRK_BACKUP_ORDNER_NAMEN = [
     "95_Ausbildung_Weiterbildung",
     "96_Unterlagen PRM Schulung",
     "97_Stellungnahmen",
+    "98_AVTECH_Fehler",
+    "98_Dispodienstplan",
+    "99_Druckvorlagen",
+    "101_ZÜP",
 ]
 
 # Zielverzeichnisse
