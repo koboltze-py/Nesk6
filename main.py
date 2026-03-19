@@ -25,8 +25,9 @@ import glob
 from datetime import datetime
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QPalette, QColor
+from PySide6.QtGui import QFont, QPalette, QColor, QIcon
 from gui.main_window import MainWindow
+from gui.splash_screen import SplashScreen
 
 
 def _db_startup_backup():
@@ -142,10 +143,7 @@ def main():
     app.setPalette(pal)
 
     # -----------------------------------------------------------------------
-    # GLOBAL STYLESHEET – Font-Familie und Schriftgröße für alle QWidgets,
-    # die kein eigenes Stylesheet haben. Farbe wird durch die Palette geregelt;
-    # explizite widget-eigene Stylesheets (z.B. "color: white" in der Sidebar)
-    # haben höhere Spezifizität und überschreiben diesen Basis-Style problemlos.
+    # GLOBAL STYLESHEET
     # -----------------------------------------------------------------------
     app.setStyleSheet("""
         QWidget {
@@ -161,10 +159,23 @@ def main():
         }
     """)
 
-    # DB-Backup vor Programmstart
+    # App-Icon setzen
+    _icon_path = os.path.join(BASE_DIR, "Daten", "Logo", "nesk3.ico")
+    if os.path.exists(_icon_path):
+        app.setWindowIcon(QIcon(_icon_path))
+
+    # ── Splash Screen ──────────────────────────────────────────────────────
+    from config import APP_VERSION
+    splash = SplashScreen(version=APP_VERSION)
+    splash.show()
+    QApplication.processEvents()
+
+    # ── DB-Backup ──────────────────────────────────────────────────────────
+    splash.set_status("Datenbank-Backup wird erstellt …")
     _db_startup_backup()
 
-    # Datenbanktabellen beim ersten Start erstellen
+    # ── Migrationen ────────────────────────────────────────────────────────
+    splash.set_status("Datenbanktabellen werden geprüft …")
     try:
         from database.migrations import run_migrations
         run_migrations()
@@ -172,33 +183,44 @@ def main():
         print(f"[WARNUNG] Datenbankinitialisierung fehlgeschlagen: {e}")
         print("[INFO] Bitte Datenbankverbindung in config.py konfigurieren.")
 
-    # Mitarbeiter-Datenbank initialisieren (database SQL/mitarbeiter.db)
+    # ── Mitarbeiter-DB ─────────────────────────────────────────────────────
     try:
         from database.connection import init_mitarbeiter_db
         init_mitarbeiter_db()
     except Exception as e:
         print(f"[WARNUNG] Mitarbeiter-DB Initialisierung fehlgeschlagen: {e}")
 
-    # Turso-Sync: Schema sicherstellen, einmalig Pull beim Start, dann alle 30s
+    # ── Turso-Sync ─────────────────────────────────────────────────────────
     # AUSNAHME: Falls ein Backup-Restore ausstehend ist, zuerst lokal → Turso pushen
     # (verhindert dass pull_all() die wiederhergestellten Daten überschreibt).
     try:
-        from database.turso_sync import ensure_turso_schema, pull_all, start_background_sync, push_all_local_to_turso
+        from database.turso_sync import (
+            ensure_turso_schema, pull_all, start_background_sync,
+            push_all_local_to_turso, init_sync_ts,
+        )
         from backup.backup_manager import is_restore_pending, clear_restore_pending
+        splash.set_status("Turso-Schema wird geprüft …")
         ensure_turso_schema()
         if is_restore_pending():
+            splash.set_status("Wiederhergestellte Daten werden nach Turso übertragen …")
             print("[Start] Backup-Restore ausstehend: sende wiederhergestellte Daten nach Turso...")
             push_all_local_to_turso()
             clear_restore_pending()
             print("[Start] Turso wurde mit wiederhergestellten Daten aktualisiert.")
         else:
+            splash.set_status("Daten werden mit Turso synchronisiert …")
             pull_all()
+        # Timestamp setzen – Hintergrundthread startet danach ohne Doppelpull
+        init_sync_ts()
         start_background_sync()
     except Exception as e:
         print(f"[WARNUNG] Turso-Sync konnte nicht gestartet werden: {e}")
         print("[INFO] App läuft weiter mit lokalen Datenbanken.")
 
+    # ── Hauptfenster ───────────────────────────────────────────────────────
+    splash.set_status("Oberfläche wird geladen …")
     window = MainWindow()
+    splash.finish(window)
     window.show()
     sys.exit(app.exec())
 

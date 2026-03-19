@@ -865,6 +865,20 @@ _stop_event = threading.Event()
 _last_synced_ts: str = "1970-01-01T00:00:00"  # Zeitstempel des letzten erfolgreichen Pulls
 
 
+def init_sync_ts() -> None:
+    """
+    Setzt den internen Sync-Timestamp auf den aktuellen Turso-Stand.
+    Muss nach dem initialen pull_all() beim Start aufgerufen werden,
+    damit der Hintergrundthread nicht sofort nochmal alles pulled
+    (und 'X remote Löschungen lokal angewendet' nicht doppelt erscheint).
+    """
+    global _last_synced_ts
+    try:
+        _last_synced_ts = _get_turso_last_modified()
+    except Exception:
+        pass
+
+
 def start_background_sync() -> None:
     """
     Startet den Hintergrund-Sync-Thread.
