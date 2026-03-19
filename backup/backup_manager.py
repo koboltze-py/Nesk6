@@ -241,7 +241,8 @@ _GEMEINSAM_SRC = os.path.join(os.path.dirname(BASE_DIR))  # parent von Nesk3 = !
 
 def _gemeinsam_src_dir() -> str:
     """Gibt den Quellordner zurück (Dateien von ... !Gemeinsam.26)."""
-    return os.path.dirname(BASE_DIR)
+    # BASE_DIR = .../Nesk/Nesk3  →  dirname x2 = .../!Gemeinsam.26
+    return os.path.dirname(os.path.dirname(BASE_DIR))
 
 
 def get_gemeinsam_backup_stats() -> dict:
@@ -252,9 +253,9 @@ def get_gemeinsam_backup_stats() -> dict:
     anzahl = 0
     groesse = 0
     letzte = 0.0
-    nesk_pfad = os.path.normpath(BASE_DIR)
+    nesk_pfad = os.path.normpath(os.path.dirname(BASE_DIR))  # .../Nesk
     for root, dirs, files in os.walk(src):
-        # Nesk-Ordner selbst überspringen
+        # Nesk-Ordner (→ enthält Nesk3) komplett überspringen
         dirs[:] = [d for d in dirs if os.path.normpath(os.path.join(root, d)) != nesk_pfad]
         for f in files:
             fp = os.path.join(root, f)
@@ -286,7 +287,7 @@ def create_gemeinsam_backup(inkrementell: bool = True, progress_callback=None) -
     os.makedirs(ziel, exist_ok=True)
 
     src = _gemeinsam_src_dir()
-    nesk_pfad = os.path.normpath(BASE_DIR)
+    nesk_pfad = os.path.normpath(os.path.dirname(BASE_DIR))  # .../Nesk
 
     # Dateien sammeln
     alle: list[str] = []
