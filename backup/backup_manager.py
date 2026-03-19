@@ -372,100 +372,138 @@ def list_gemeinsam_backups() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# SQL-Datenbanken Backup (manuelle Sicherung via Button)
+# SQL-Datenbanken Backup (manuell via Button, selbe Struktur wie Startup-Backup)
+# Ziel: database SQL/Backup Data/db_backups/YYYY-MM-DD/<name>_HHMMSS.db
+# Rotation: max. 5 Snapshots pro Tag je DB, max. 7 Tages-Ordner
 # ---------------------------------------------------------------------------
 
-_SQL_BACKUP_DIR = os.path.join(BASE_DIR, "Backup Data", "sql_backups")
-
-
 def create_sql_databases_backup(progress_callback=None) -> dict:
-    """Sichert alle .db-Dateien aus dem 'database SQL' Ordner in einen Zeitstempel-Ordner."""
+    """
+    Sichert alle .db-Dateien in die gemeinsame db_backups-Struktur
+    (selbes Verzeichnis wie der automatische Startup-Backup).
+    Rotation: max. 5 Snapshots pro Tag je Datenbank, max. 7 Tages-Ordner.
+    """
+    import sqlite3 as _sqlite3
     from config import DB_PATH
-    db_dir = os.path.dirname(DB_PATH)
-    os.makedirs(_SQL_BACKUP_DIR, exist_ok=True)
-    stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    ziel  = os.path.join(_SQL_BACKUP_DIR, stamp)
-    os.makedirs(ziel, exist_ok=True)
+    db_dir   = os.path.dirname(DB_PATH)
+    basis    = os.path.join(db_dir, "Backup Data", "db_backups")
+    jetzt    = datetime.now()
+    tag_ord  = os.path.join(basis, jetzt.strftime("%Y-%m-%d"))
+    os.makedirs(tag_ord, exist_ok=True)
+    zeitstempel = jetzt.strftime("%H%M%S")
 
     db_files = glob.glob(os.path.join(db_dir, "*.db"))
-    gesamt = len(db_files)
-    kopiert = 0
+    gesamt   = len(db_files)
+    kopiert  = 0
 
     for i, fp in enumerate(sorted(db_files)):
         fname = os.path.basename(fp)
+        name  = os.path.splitext(fname)[0]
+        ziel  = os.path.join(tag_ord, f"{name}_{zeitstempel}.db")
         if progress_callback:
             progress_callback(i + 1, gesamt, fname)
         try:
-            import sqlite3
-            src_conn = sqlite3.connect(fp)
-            dst_conn = sqlite3.connect(os.path.join(ziel, fname))
+            src_conn = _sqlite3.connect(fp)
+            dst_conn = _sqlite3.connect(ziel)
             src_conn.backup(dst_conn)
             dst_conn.close()
             src_conn.close()
             kopiert += 1
         except Exception as e:
             print(f"[Backup] Fehler bei {fname}: {e}")
+            continue
+
+        # Pro Tag max. 5 Snapshots je Datenbank behalten
+        tages = sorted(glob.glob(os.path.join(tag_ord, f"{name}_*.db")))
+        for alt in tages[:-5]:
+            try:
+                os.remove(alt)
+            except Exception:
+                pass
+
+    # Max. 7 Tages-Ordner behalten
+    alle_tage = sorted([
+        d for d in os.listdir(basis)
+        if os.path.isdir(os.path.join(basis, d)) and len(d) == 10 and d.count("-") == 2
+    ])
+    for alter_tag in alle_tage[:-7]:
+        try:
+            shutil.rmtree(os.path.join(basis, alter_tag))
+        except Exception:
+            pass
 
     return {
         "erfolg": True,
         "dateien_count": kopiert,
         "skipped_count": 0,
         "error_count": gesamt - kopiert,
-        "meldung": f"{kopiert} von {gesamt} Datenbank(en) gesichert.\nSpeicherort: {ziel}",
+        "meldung": (
+            f"{kopiert} von {gesamt} Datenbank(en) gesichert.\n"
+            f"Speicherort: {tag_ord}"
+        ),
     }
 
 
 def list_sql_backups() -> list[dict]:
-    """Listet alle manuellen SQL-Datenbank-Backups auf."""
-    if not os.path.isdir(_SQL_BACKUP_DIR):
-        return []
-    result = []
-    for name in sorted(os.listdir(_SQL_BACKUP_DIR), reverse=True):
-        pfad = os.path.join(_SQL_BACKUP_DIR, name)
-        if not os.path.isdir(pfad):
-            continue
-        db_files = glob.glob(os.path.join(pfad, "*.db"))
-        groesse  = sum(os.path.getsize(f) for f in db_files)
-        mtime    = os.path.getmtime(pfad)
-        result.append({
-            "datum":       datetime.fromtimestamp(mtime).strftime("%d.%m.%Y %H:%M"),
-            "pfad":        pfad,
-            "anzahl_dbs":  len(db_files),
-            "groesse_mb":  round(groesse / (1024 * 1024), 1),
-        })
-    return result
+    """
+    Listet alle SQL-DB-Backups aus der gemeinsamen db_backups-Struktur auf.
+    Gibt eine Liste von Tages-Einträgen zurück (neueste zuerst).
+    """
+    return list_db_backups()
 
 
-def restore_sql_backup(backup_pfad: str) -> dict:
+def restore_sql_backup(backup_pfad: str, ts: str | None = None) -> dict:
     """
     Stellt ein SQL-Datenbank-Backup wieder her.
-    Kopiert die .db-Dateien aus dem Backup-Ordner in den Live-DB-Ordner.
+
+    Kopiert die .db-Dateien eines Snapshots aus dem Backup-Ordner
+    in den Live-DB-Ordner. Der Zeitstempel-Suffix (_HHMMSS) wird dabei
+    vom Live-Dateinamen entfernt (z.B. nesk_081500.db → nesk.db).
+
+    Parameters
+    ----------
+    backup_pfad : Tages-Ordner des Backups (YYYY-MM-DD)
+    ts          : Zeitstempel (HHMMSS) des Snapshots; None = neuester
     """
+    import sqlite3 as _sqlite3
     from config import DB_PATH
     db_dir = os.path.dirname(DB_PATH)
 
-    db_files = glob.glob(os.path.join(backup_pfad, "*.db"))
-    if not db_files:
-        return {"erfolg": False, "meldung": "Keine Datenbank-Dateien im Backup gefunden."}
+    # Neuesten Zeitstempel ermitteln, wenn keiner angegeben
+    if ts is None:
+        alle_ts = set()
+        for fp in glob.glob(os.path.join(backup_pfad, "*.db")):
+            name = os.path.basename(fp)
+            parts = name.rsplit("_", 1)
+            if len(parts) == 2 and parts[1].replace(".db", "").isdigit():
+                alle_ts.add(parts[1].replace(".db", ""))
+        if not alle_ts:
+            return {"erfolg": False, "meldung": "Keine Backup-Dateien im Tages-Ordner gefunden."}
+        ts = sorted(alle_ts)[-1]
 
-    import sqlite3
+    snapshot_files = glob.glob(os.path.join(backup_pfad, f"*_{ts}.db"))
+    if not snapshot_files:
+        return {"erfolg": False, "meldung": f"Snapshot {ts} nicht gefunden."}
+
     kopiert = 0
-    for fp in sorted(db_files):
-        fname = os.path.basename(fp)
-        ziel  = os.path.join(db_dir, fname)
+    for fp in sorted(snapshot_files):
+        # Originalnamen rekonstruieren: "<name>_HHMMSS.db" → "<name>.db"
+        base = os.path.basename(fp)
+        orig_name = base.rsplit(f"_{ts}", 1)[0] + ".db"
+        ziel = os.path.join(db_dir, orig_name)
         try:
-            src_conn = sqlite3.connect(fp)
-            dst_conn = sqlite3.connect(ziel)
+            src_conn = _sqlite3.connect(fp)
+            dst_conn = _sqlite3.connect(ziel)
             src_conn.backup(dst_conn)
             dst_conn.close()
             src_conn.close()
             kopiert += 1
         except Exception as e:
-            print(f"[Restore] Fehler bei {fname}: {e}")
+            print(f"[Restore] Fehler bei {orig_name}: {e}")
 
     return {
-        "erfolg": True,
-        "meldung": f"{kopiert} Datenbank(en) wiederhergestellt.",
+        "erfolg": kopiert > 0,
+        "meldung": f"{kopiert} Datenbank(en) wiederhergestellt aus Snapshot {ts}.",
     }
 
 

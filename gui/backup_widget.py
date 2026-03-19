@@ -576,7 +576,7 @@ class BackupWidget(QWidget):
         self._sql_list.clear()
         sql_backups = backup_manager.list_sql_backups()
         for backup in sql_backups:
-            item_text = f"🗄️ {backup['datum']} | {backup['anzahl_dbs']} DB(s) | {backup['groesse_mb']} MB"
+            item_text = f"🗄️ {backup['datum_anzeige']} | {backup['anzahl_dbs']} DB(s) | {backup['anzahl_snapshots']} Snapshots | {backup['groesse_mb']} MB"
             item = QListWidgetItem(item_text)
             item.setData(Qt.ItemDataRole.UserRole, backup)
             self._sql_list.addItem(item)
@@ -721,23 +721,27 @@ class BackupWidget(QWidget):
             self,
             "Datenbank wiederherstellen",
             f"⚠️ WARNUNG ⚠️\n\n"
-            f"Möchten Sie wirklich das Backup vom {backup['datum']} wiederherstellen?\n\n"
+            f"Möchten Sie wirklich das Backup vom {backup['datum_anzeige']} wiederherstellen?\n\n"
             f"Dies überschreibt ALLE aktuellen Datenbanken!\n"
             f"Es wird empfohlen, vorher ein neues Backup zu erstellen.\n\n"
-            f"Backup enthält {backup['anzahl_dbs']} Datenbank(en).",
+            f"Backup enthält {backup['anzahl_dbs']} Datenbank(en) ({backup['anzahl_snapshots']} Snapshots).",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                backup_manager.restore_sql_backup(backup['pfad'])
-                QMessageBox.information(
-                    self, 
-                    "Wiederherstellung erfolgreich", 
-                    f"Backup vom {backup['datum']} wurde wiederhergestellt.\n\n"
-                    f"Bitte starten Sie die Anwendung neu, damit die Änderungen wirksam werden."
-                )
+                ergebnis = backup_manager.restore_sql_backup(backup['pfad'])
+                if ergebnis.get('erfolg'):
+                    QMessageBox.information(
+                        self,
+                        "Wiederherstellung erfolgreich",
+                        f"Backup vom {backup['datum_anzeige']} wurde wiederhergestellt.\n\n"
+                        f"{ergebnis['meldung']}\n\n"
+                        f"Bitte starten Sie die Anwendung neu, damit die Änderungen wirksam werden."
+                    )
+                else:
+                    QMessageBox.critical(self, "Fehler", f"Wiederherstellung fehlgeschlagen:\n{ergebnis.get('meldung', 'Unbekannter Fehler')}")
             except Exception as e:
                 QMessageBox.critical(self, "Fehler", f"Fehler bei Wiederherstellung: {str(e)}")
 
@@ -752,14 +756,15 @@ class BackupWidget(QWidget):
         reply = QMessageBox.question(
             self,
             "Backup löschen",
-            f"Möchten Sie das SQL-Backup vom '{backup['datum']}' wirklich löschen?",
+            f"Möchten Sie das SQL-Backup vom '{backup['datum_anzeige']}' wirklich löschen?\n\n"
+            f"Alle {backup['anzahl_snapshots']} Snapshot(s) dieses Tages werden gelöscht.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 shutil.rmtree(backup['pfad'])
-                QMessageBox.information(self, "Gelöscht", f"Backup vom {backup['datum']} wurde gelöscht.")
+                QMessageBox.information(self, "Gelöscht", f"Backup vom {backup['datum_anzeige']} wurde gelöscht.")
                 self._load_backups()
             except Exception as e:
                 QMessageBox.critical(self, "Fehler", f"Fehler beim Löschen: {str(e)}")
