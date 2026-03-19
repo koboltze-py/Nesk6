@@ -232,6 +232,244 @@ def list_restored_copies() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Gemeinsam.26-Ordner Backup
+# ---------------------------------------------------------------------------
+
+_GEMEINSAM_BACKUP_DIR = os.path.join(BASE_DIR, "Backup Data", "gemeinsam_backups")
+_GEMEINSAM_SRC = os.path.join(os.path.dirname(BASE_DIR))  # parent von Nesk3 = !Gemeinsam.26
+
+
+def _gemeinsam_src_dir() -> str:
+    """Gibt den Quellordner zurück (Dateien von ... !Gemeinsam.26)."""
+    return os.path.dirname(BASE_DIR)
+
+
+def get_gemeinsam_backup_stats() -> dict:
+    """Gibt Statistiken über den Gemeinsam.26 Quellordner zurück."""
+    src = _gemeinsam_src_dir()
+    if not os.path.isdir(src):
+        return {"ordner_existiert": False, "dateien_count": 0, "groesse_mb": 0, "letzte_aenderung": "-"}
+    anzahl = 0
+    groesse = 0
+    letzte = 0.0
+    nesk_pfad = os.path.normpath(BASE_DIR)
+    for root, dirs, files in os.walk(src):
+        # Nesk-Ordner selbst überspringen
+        dirs[:] = [d for d in dirs if os.path.normpath(os.path.join(root, d)) != nesk_pfad]
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                st = os.stat(fp)
+                groesse += st.st_size
+                if st.st_mtime > letzte:
+                    letzte = st.st_mtime
+                anzahl += 1
+            except OSError:
+                pass
+    letzte_str = datetime.fromtimestamp(letzte).strftime("%d.%m.%Y %H:%M") if letzte else "-"
+    return {
+        "ordner_existiert": True,
+        "dateien_count": anzahl,
+        "groesse_mb": round(groesse / (1024 * 1024), 1),
+        "letzte_aenderung": letzte_str,
+    }
+
+
+def create_gemeinsam_backup(inkrementell: bool = True, progress_callback=None) -> dict:
+    """
+    Erstellt ein Backup des Gemeinsam.26 Ordners (ohne den Nesk-Unterordner).
+    Bei inkrementell=True werden nur geänderte Dateien kopiert.
+    """
+    os.makedirs(_GEMEINSAM_BACKUP_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ziel  = os.path.join(_GEMEINSAM_BACKUP_DIR, f"gemeinsam_{stamp}")
+    os.makedirs(ziel, exist_ok=True)
+
+    src = _gemeinsam_src_dir()
+    nesk_pfad = os.path.normpath(BASE_DIR)
+
+    # Dateien sammeln
+    alle: list[str] = []
+    for root, dirs, files in os.walk(src):
+        dirs[:] = [d for d in dirs if os.path.normpath(os.path.join(root, d)) != nesk_pfad]
+        for f in files:
+            alle.append(os.path.join(root, f))
+
+    gesamt = len(alle)
+    kopiert = 0
+    uebersprungen = 0
+    fehler = 0
+
+    for i, fp in enumerate(alle):
+        if progress_callback:
+            progress_callback(i + 1, gesamt, os.path.basename(fp))
+        rel = os.path.relpath(fp, src)
+        dst = os.path.join(ziel, rel)
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if inkrementell and os.path.exists(dst):
+                if os.path.getmtime(fp) <= os.path.getmtime(dst):
+                    uebersprungen += 1
+                    continue
+            shutil.copy2(fp, dst)
+            kopiert += 1
+        except Exception:
+            fehler += 1
+
+    if kopiert == 0 and uebersprungen > 0:
+        # Nichts Neues → leeren Ordner wieder entfernen
+        try:
+            shutil.rmtree(ziel)
+        except Exception:
+            pass
+        return {
+            "erfolg": True, "dateien_count": 0, "skipped_count": uebersprungen,
+            "error_count": fehler,
+            "meldung": f"Kein neues Backup nötig – alle {uebersprungen} Dateien sind aktuell.",
+        }
+
+    return {
+        "erfolg": True,
+        "dateien_count": kopiert,
+        "skipped_count": uebersprungen,
+        "error_count": fehler,
+        "meldung": (
+            f"Backup erstellt: {kopiert} Datei(en) gesichert"
+            + (f", {uebersprungen} unverändert übersprungen" if uebersprungen else "")
+            + (f", {fehler} Fehler" if fehler else "")
+            + f".\nSpeicherort: {ziel}"
+        ),
+    }
+
+
+def list_gemeinsam_backups() -> list[dict]:
+    """Listet alle Gemeinsam.26 Backups auf."""
+    if not os.path.isdir(_GEMEINSAM_BACKUP_DIR):
+        return []
+    result = []
+    for name in sorted(os.listdir(_GEMEINSAM_BACKUP_DIR), reverse=True):
+        pfad = os.path.join(_GEMEINSAM_BACKUP_DIR, name)
+        if not os.path.isdir(pfad):
+            continue
+        dateien = []
+        g = 0
+        for root, _, files in os.walk(pfad):
+            for f in files:
+                fp = os.path.join(root, f)
+                try:
+                    g += os.path.getsize(fp)
+                except OSError:
+                    pass
+                dateien.append(fp)
+        mtime = os.path.getmtime(pfad)
+        result.append({
+            "dateiname": name,
+            "pfad": pfad,
+            "groesse_mb": round(g / (1024 * 1024), 1),
+            "erstellt": datetime.fromtimestamp(mtime).strftime("%d.%m.%Y %H:%M"),
+        })
+    return result
+
+
+# ---------------------------------------------------------------------------
+# SQL-Datenbanken Backup (manuelle Sicherung via Button)
+# ---------------------------------------------------------------------------
+
+_SQL_BACKUP_DIR = os.path.join(BASE_DIR, "Backup Data", "sql_backups")
+
+
+def create_sql_databases_backup(progress_callback=None) -> dict:
+    """Sichert alle .db-Dateien aus dem 'database SQL' Ordner in einen Zeitstempel-Ordner."""
+    from config import DB_PATH
+    db_dir = os.path.dirname(DB_PATH)
+    os.makedirs(_SQL_BACKUP_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    ziel  = os.path.join(_SQL_BACKUP_DIR, stamp)
+    os.makedirs(ziel, exist_ok=True)
+
+    db_files = glob.glob(os.path.join(db_dir, "*.db"))
+    gesamt = len(db_files)
+    kopiert = 0
+
+    for i, fp in enumerate(sorted(db_files)):
+        fname = os.path.basename(fp)
+        if progress_callback:
+            progress_callback(i + 1, gesamt, fname)
+        try:
+            import sqlite3
+            src_conn = sqlite3.connect(fp)
+            dst_conn = sqlite3.connect(os.path.join(ziel, fname))
+            src_conn.backup(dst_conn)
+            dst_conn.close()
+            src_conn.close()
+            kopiert += 1
+        except Exception as e:
+            print(f"[Backup] Fehler bei {fname}: {e}")
+
+    return {
+        "erfolg": True,
+        "dateien_count": kopiert,
+        "skipped_count": 0,
+        "error_count": gesamt - kopiert,
+        "meldung": f"{kopiert} von {gesamt} Datenbank(en) gesichert.\nSpeicherort: {ziel}",
+    }
+
+
+def list_sql_backups() -> list[dict]:
+    """Listet alle manuellen SQL-Datenbank-Backups auf."""
+    if not os.path.isdir(_SQL_BACKUP_DIR):
+        return []
+    result = []
+    for name in sorted(os.listdir(_SQL_BACKUP_DIR), reverse=True):
+        pfad = os.path.join(_SQL_BACKUP_DIR, name)
+        if not os.path.isdir(pfad):
+            continue
+        db_files = glob.glob(os.path.join(pfad, "*.db"))
+        groesse  = sum(os.path.getsize(f) for f in db_files)
+        mtime    = os.path.getmtime(pfad)
+        result.append({
+            "datum":       datetime.fromtimestamp(mtime).strftime("%d.%m.%Y %H:%M"),
+            "pfad":        pfad,
+            "anzahl_dbs":  len(db_files),
+            "groesse_mb":  round(groesse / (1024 * 1024), 1),
+        })
+    return result
+
+
+def restore_sql_backup(backup_pfad: str) -> dict:
+    """
+    Stellt ein SQL-Datenbank-Backup wieder her.
+    Kopiert die .db-Dateien aus dem Backup-Ordner in den Live-DB-Ordner.
+    """
+    from config import DB_PATH
+    db_dir = os.path.dirname(DB_PATH)
+
+    db_files = glob.glob(os.path.join(backup_pfad, "*.db"))
+    if not db_files:
+        return {"erfolg": False, "meldung": "Keine Datenbank-Dateien im Backup gefunden."}
+
+    import sqlite3
+    kopiert = 0
+    for fp in sorted(db_files):
+        fname = os.path.basename(fp)
+        ziel  = os.path.join(db_dir, fname)
+        try:
+            src_conn = sqlite3.connect(fp)
+            dst_conn = sqlite3.connect(ziel)
+            src_conn.backup(dst_conn)
+            dst_conn.close()
+            src_conn.close()
+            kopiert += 1
+        except Exception as e:
+            print(f"[Restore] Fehler bei {fname}: {e}")
+
+    return {
+        "erfolg": True,
+        "meldung": f"{kopiert} Datenbank(en) wiederhergestellt.",
+    }
+
+
+# ---------------------------------------------------------------------------
 # ZIP-Backup  /  ZIP-Restore  (gesamter Nesk3-Quellcode-Ordner)
 # ---------------------------------------------------------------------------
 
