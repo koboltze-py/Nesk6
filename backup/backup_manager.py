@@ -15,6 +15,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import BACKUP_DIR, BACKUP_MAX_KEEP, BASE_DIR
 
 
+def _lp(p: str) -> str:
+    """
+    Fügt den Windows-Long-Path-Präfix (\\?\\) hinzu, wenn der Pfad
+    die MAX_PATH-Grenze von 260 Zeichen überschreitet.
+    Wird von Backup-Funktionen genutzt, um Pfadfehler bei langen OneDrive-Pfaden zu vermeiden.
+    """
+    if sys.platform == 'win32' and len(p) > 259 and not p.startswith('\\\\?\\'):
+        return '\\\\?\\' + p
+    return p
+
+
 def _ensure_backup_dir() -> str:
     """Erstellt das Backup-Verzeichnis falls nicht vorhanden."""
     path = os.path.join(BASE_DIR, BACKUP_DIR)
@@ -300,6 +311,7 @@ def create_gemeinsam_backup(inkrementell: bool = True, progress_callback=None) -
     kopiert = 0
     uebersprungen = 0
     fehler = 0
+    fehler_liste: list[str] = []
 
     for i, fp in enumerate(alle):
         if progress_callback:
@@ -307,15 +319,16 @@ def create_gemeinsam_backup(inkrementell: bool = True, progress_callback=None) -
         rel = os.path.relpath(fp, src)
         dst = os.path.join(ziel, rel)
         try:
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            if inkrementell and os.path.exists(dst):
-                if os.path.getmtime(fp) <= os.path.getmtime(dst):
+            os.makedirs(_lp(os.path.dirname(dst)), exist_ok=True)
+            if inkrementell and os.path.exists(_lp(dst)):
+                if os.path.getmtime(_lp(fp)) <= os.path.getmtime(_lp(dst)):
                     uebersprungen += 1
                     continue
-            shutil.copy2(fp, dst)
+            shutil.copy2(_lp(fp), _lp(dst))
             kopiert += 1
-        except Exception:
+        except Exception as e:
             fehler += 1
+            fehler_liste.append(f"{os.path.basename(fp)} ({type(e).__name__})")
 
     if kopiert == 0 and uebersprungen > 0:
         # Nichts Neues → leeren Ordner wieder entfernen
@@ -325,21 +338,28 @@ def create_gemeinsam_backup(inkrementell: bool = True, progress_callback=None) -
             pass
         return {
             "erfolg": True, "dateien_count": 0, "skipped_count": uebersprungen,
-            "error_count": fehler,
+            "error_count": fehler, "fehler_liste": fehler_liste,
             "meldung": f"Kein neues Backup nötig – alle {uebersprungen} Dateien sind aktuell.",
         }
+
+    meldung = (
+        f"Backup erstellt: {kopiert} Datei(en) gesichert"
+        + (f", {uebersprungen} unverändert übersprungen" if uebersprungen else "")
+        + (f", {fehler} Fehler" if fehler else "")
+        + f".\nSpeicherort: {ziel}"
+    )
+    if fehler_liste:
+        meldung += "\n\nNicht kopiert (Pfad zu lang oder Zugriffsfehler):\n" + "\n".join(f"  • {f}" for f in fehler_liste[:10])
+        if len(fehler_liste) > 10:
+            meldung += f"\n  ... und {len(fehler_liste) - 10} weitere"
 
     return {
         "erfolg": True,
         "dateien_count": kopiert,
         "skipped_count": uebersprungen,
         "error_count": fehler,
-        "meldung": (
-            f"Backup erstellt: {kopiert} Datei(en) gesichert"
-            + (f", {uebersprungen} unverändert übersprungen" if uebersprungen else "")
-            + (f", {fehler} Fehler" if fehler else "")
-            + f".\nSpeicherort: {ziel}"
-        ),
+        "fehler_liste": fehler_liste,
+        "meldung": meldung,
     }
 
 
@@ -801,7 +821,7 @@ def create_drk_daten_backup(progress_callback=None) -> dict:
                 if progress_callback:
                     progress_callback(i + 1, gesamt, os.path.basename(abs_pfad))
                 try:
-                    zf.write(abs_pfad, arc_pfad)
+                    zf.write(_lp(abs_pfad), arc_pfad)
                 except (PermissionError, OSError):
                     # Gesperrte Datei – überspringen, nicht abbrechen
                     uebersprungen += 1
