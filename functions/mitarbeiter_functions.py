@@ -13,6 +13,7 @@ from datetime import date, datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.connection import ma_db_cursor
+from config import MITARBEITER_DB_PATH as _MA_DB_PATH
 from database.models import Mitarbeiter
 
 
@@ -124,7 +125,12 @@ def mitarbeiter_loeschen(mitarbeiter_id: int) -> bool:
     """Löscht einen Mitarbeiter anhand der ID."""
     with ma_db_cursor(commit=True) as cur:
         cur.execute("DELETE FROM mitarbeiter WHERE id=?", (mitarbeiter_id,))
-        return True
+    try:
+        from database.turso_sync import push_delete
+        push_delete(_MA_DB_PATH, "mitarbeiter", mitarbeiter_id)
+    except Exception:
+        pass
+    return True
 
 
 def mitarbeiter_suchen(suchbegriff: str) -> list[Mitarbeiter]:

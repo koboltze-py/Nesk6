@@ -7,6 +7,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database.connection import db_cursor
+from config import DB_PATH as _NESK3_DB_PATH
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -67,7 +68,13 @@ def aktualisiere_fahrzeug(
 def loesche_fahrzeug(fahrzeug_id: int) -> bool:
     with db_cursor(commit=True) as cur:
         cur.execute("DELETE FROM fahrzeuge WHERE id = ?", (fahrzeug_id,))
-        return cur.rowcount > 0
+        result = cur.rowcount > 0
+    try:
+        from database.turso_sync import push_delete
+        push_delete(_NESK3_DB_PATH, "fahrzeuge", fahrzeug_id)
+    except Exception:
+        pass
+    return result
 
 
 def lade_alle_fahrzeuge(nur_aktive: bool = False) -> list[dict]:
@@ -143,7 +150,13 @@ def aktueller_status(fahrzeug_id: int) -> dict | None:
 def loesche_status_eintrag(eintrag_id: int) -> bool:
     with db_cursor(commit=True) as cur:
         cur.execute("DELETE FROM fahrzeug_status WHERE id = ?", (eintrag_id,))
-        return cur.rowcount > 0
+        result = cur.rowcount > 0
+    try:
+        from database.turso_sync import push_delete
+        push_delete(_NESK3_DB_PATH, "fahrzeug_status", eintrag_id)
+    except Exception:
+        pass
+    return result
 
 
 def aktualisiere_status_eintrag(
@@ -225,7 +238,13 @@ def markiere_schaden_behoben(schaden_id: int, behoben_am: str) -> bool:
 def loesche_schaden(schaden_id: int) -> bool:
     with db_cursor(commit=True) as cur:
         cur.execute("DELETE FROM fahrzeug_schaeden WHERE id = ?", (schaden_id,))
-        return cur.rowcount > 0
+        result = cur.rowcount > 0
+    try:
+        from database.turso_sync import push_delete
+        push_delete(_NESK3_DB_PATH, "fahrzeug_schaeden", schaden_id)
+    except Exception:
+        pass
+    return result
 
 
 def markiere_schaden_gesendet(schaden_id: int) -> bool:
@@ -323,7 +342,13 @@ def markiere_termin_erledigt(termin_id: int) -> bool:
 def loesche_termin(termin_id: int) -> bool:
     with db_cursor(commit=True) as cur:
         cur.execute("DELETE FROM fahrzeug_termine WHERE id = ?", (termin_id,))
-        return cur.rowcount > 0
+        result = cur.rowcount > 0
+    try:
+        from database.turso_sync import push_delete
+        push_delete(_NESK3_DB_PATH, "fahrzeug_termine", termin_id)
+    except Exception:
+        pass
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════════════════

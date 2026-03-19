@@ -3,8 +3,12 @@
 **DRK Flughafen Köln – Erste-Hilfe-Station**  
 Dienstplan-Verwaltung, Stärkemeldung und Mitarbeiterverwaltung
 
-**Version:** v3.4.2 (12.03.2026)  
+**Version:** v3.4.4 (14.03.2026)  
 **Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · Ma. Ausdrucke · Krankmeldungen · **Telefonnummern** · Backup · Einstellungen · Hilfe
+
+### Neu in v3.4.4
+- **Dienstplan Word-Export**: Speicherort-Button entfernt – Speicherdialog öffnet direkt beim Klick auf „Exportieren“
+- **Dienstplan Word-Export**: Kein doppeltes Speichern mehr – zweiter „Kopie speichern“-Dialog entfernt
 
 ### Neu in v3.4.2
 - **Übergabe – Verspätungen**: 3 Bugs behoben (Vortag nach Speichern sichtbar, Auto-Einträge werden persistiert, kein Duplikat-Problem)

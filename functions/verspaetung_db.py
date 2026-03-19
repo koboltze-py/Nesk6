@@ -102,6 +102,11 @@ def verspaetung_loeschen(entry_id: int):
     with _connect() as conn:
         conn.execute("DELETE FROM verspaetungen WHERE id=?", (entry_id,))
         conn.commit()
+    try:
+        from database.turso_sync import push_delete
+        push_delete(str(_DB_PFAD), "verspaetungen", entry_id)
+    except Exception:
+        pass
 
 
 def lade_verspaetungen(

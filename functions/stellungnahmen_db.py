@@ -134,6 +134,11 @@ def eintrag_loeschen(row_id: int) -> None:
     with _db() as con:
         con.execute("DELETE FROM stellungnahmen WHERE id = ?", (row_id,))
     try:
+        from database.turso_sync import push_delete
+        push_delete(DB_PFAD, "stellungnahmen", row_id)
+    except Exception:
+        pass
+    try:
         from functions.stellungnahmen_html_export import generiere_html as _html_gen
         _html_gen()
     except Exception:

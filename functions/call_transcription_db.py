@@ -186,6 +186,11 @@ def loeschen(record_id: int):
     with _get_conn() as conn:
         conn.execute("DELETE FROM call_logs WHERE id=?", (record_id,))
         conn.commit()
+    try:
+        from database.turso_sync import push_delete
+        push_delete(_DB_PATH, "call_logs", record_id)
+    except Exception:
+        pass
 
 
 # ── Textbausteine ──────────────────────────────────────────────────────────────
@@ -216,3 +221,8 @@ def textbaustein_loeschen(baustein_id: int):
     with _get_conn() as conn:
         conn.execute("DELETE FROM textbausteine WHERE id=?", (baustein_id,))
         conn.commit()
+    try:
+        from database.turso_sync import push_delete
+        push_delete(_DB_PATH, "textbausteine", baustein_id)
+    except Exception:
+        pass

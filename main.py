@@ -179,6 +179,16 @@ def main():
     except Exception as e:
         print(f"[WARNUNG] Mitarbeiter-DB Initialisierung fehlgeschlagen: {e}")
 
+    # Turso-Sync: Schema sicherstellen, einmalig Pull beim Start, dann alle 30s
+    try:
+        from database.turso_sync import ensure_turso_schema, pull_all, start_background_sync
+        ensure_turso_schema()
+        pull_all()
+        start_background_sync()
+    except Exception as e:
+        print(f"[WARNUNG] Turso-Sync konnte nicht gestartet werden: {e}")
+        print("[INFO] App läuft weiter mit lokalen Datenbanken.")
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

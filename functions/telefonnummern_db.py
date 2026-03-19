@@ -263,6 +263,14 @@ def importiere_aus_excel(clear_first: bool = True) -> int:
             "INSERT INTO tel_import_log (importiert_am, quelle, anzahl) VALUES (?, ?, ?)",
             (now, "alle Dateien", len(alle_eintraege)),
         )
+    try:
+        from database.turso_sync import push_clear_table, push_table_batch
+        if clear_first:
+            push_clear_table(str(_DB_PFAD), "telefonnummern")
+        push_table_batch(str(_DB_PFAD), "telefonnummern")
+        push_table_batch(str(_DB_PFAD), "tel_import_log")
+    except Exception:
+        pass
 
     return len(alle_eintraege)
 
@@ -415,3 +423,8 @@ def eintrag_aktualisieren(entry_id: int, daten: dict) -> None:
 def eintrag_loeschen(entry_id: int) -> None:
     with _db() as con:
         con.execute("DELETE FROM telefonnummern WHERE id = ?", (entry_id,))
+    try:
+        from database.turso_sync import push_delete
+        push_delete(str(_DB_PFAD), "telefonnummern", entry_id)
+    except Exception:
+        pass

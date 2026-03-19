@@ -7,6 +7,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database.connection import db_cursor
+from config import DB_PATH as _NESK3_DB_PATH
 
 
 # ── Erstellen ──────────────────────────────────────────────────────────────────
@@ -133,7 +134,13 @@ def loesche_protokoll(protokoll_id: int) -> bool:
             "DELETE FROM uebergabe_protokolle WHERE id = ?",
             (protokoll_id,)
         )
-        return cur.rowcount > 0
+        result = cur.rowcount > 0
+    try:
+        from database.turso_sync import push_delete
+        push_delete(_NESK3_DB_PATH, "uebergabe_protokolle", protokoll_id)
+    except Exception:
+        pass
+    return result
 
 
 # ── Abschließen ───────────────────────────────────────────────────────────────
@@ -187,6 +194,11 @@ def speichere_fahrzeug_notizen(protokoll_id: int, notizen: dict) -> None:
                         (protokoll_id, fahrzeug_id, notiz)
                     VALUES (?, ?, ?)
                 """, (protokoll_id, fid, notiz.strip()))
+    try:
+        from database.turso_sync import push_replace_by_fk
+        push_replace_by_fk(_NESK3_DB_PATH, "uebergabe_fahrzeug_notizen", "protokoll_id", protokoll_id)
+    except Exception:
+        pass
 
 
 def lade_fahrzeug_notizen(protokoll_id: int) -> dict:
@@ -223,6 +235,11 @@ def speichere_handy_eintraege(protokoll_id: int, eintraege: list) -> None:
                         (protokoll_id, geraet_nr, notiz)
                     VALUES (?, ?, ?)
                 """, (protokoll_id, geraet_nr.strip(), notiz.strip() if notiz else ""))
+    try:
+        from database.turso_sync import push_replace_by_fk
+        push_replace_by_fk(_NESK3_DB_PATH, "uebergabe_handy_eintraege", "protokoll_id", protokoll_id)
+    except Exception:
+        pass
 
 
 def lade_handy_eintraege(protokoll_id: int) -> list:
@@ -256,6 +273,11 @@ def speichere_verspaetungen(protokoll_id: int, eintraege: list) -> None:
                     "(protokoll_id, mitarbeiter, soll_zeit, ist_zeit) VALUES (?, ?, ?, ?)",
                     (protokoll_id, name, soll, ist)
                 )
+    try:
+        from database.turso_sync import push_replace_by_fk
+        push_replace_by_fk(_NESK3_DB_PATH, "uebergabe_verspaetungen", "protokoll_id", protokoll_id)
+    except Exception:
+        pass
 
 
 def lade_verspaetungen(protokoll_id: int) -> list:
@@ -302,7 +324,14 @@ def loesche_protokolle_bulk(ids: list) -> int:
             f"DELETE FROM uebergabe_protokolle WHERE id IN ({placeholders})",
             list(ids)
         )
-        return cur.rowcount
+        count = cur.rowcount
+    try:
+        from database.turso_sync import push_delete
+        for row_id in ids:
+            push_delete(_NESK3_DB_PATH, "uebergabe_protokolle", row_id)
+    except Exception:
+        pass
+    return count
 
 
 def archiviere_protokolle_bulk(ids: list) -> int:

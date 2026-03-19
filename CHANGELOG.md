@@ -5,6 +5,19 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
+## 14.03.2026 – v3.4.4
+
+### Dienstplan – Word-Export bereinigt
+
+#### `gui/dienstplan.py`
+- **Doppeltes Speichern entfernt**: Der zweite „Kopie speichern unter…“-Dialog nach dem Export wurde entfernt
+- **Speicherort-Button entfernt**: Der „Speicherort wählen…“-Button im Export-Dialog entfällt; der Datei-Speicherdialog öffnet sich jetzt direkt beim Klick auf „Exportieren“
+
+#### `functions/staerkemeldung_export.py`
+- Kleinere Anpassungen im Zuge des Export-Refactorings
+
+---
+
 ## 12.03.2026 – v3.4.3 / Version 1.1
 
 ### Übergabe – Verspätungen komplett überarbeitet

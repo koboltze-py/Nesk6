@@ -317,11 +317,22 @@ def patient_aktualisieren(row_id: int, daten: dict, verbrauchsmaterial: list[dic
                 "INSERT INTO medikamente (patienten_id, medikament, dosis, applikation) VALUES (?, ?, ?, ?)",
                 (row_id, med.get("medikament", ""), med.get("dosis", ""), med.get("applikation", ""))
             )
+    try:
+        from database.turso_sync import push_replace_by_fk
+        push_replace_by_fk(_PATIENTEN_DB_PFAD, "verbrauchsmaterial", "patienten_id", row_id)
+        push_replace_by_fk(_PATIENTEN_DB_PFAD, "medikamente", "patienten_id", row_id)
+    except Exception:
+        pass
 
 
 def patient_loeschen(row_id: int) -> None:
     with _patienten_db() as con:
         con.execute("DELETE FROM patienten WHERE id=?", (row_id,))
+    try:
+        from database.turso_sync import push_delete
+        push_delete(_PATIENTEN_DB_PFAD, "patienten", row_id)
+    except Exception:
+        pass
 
 
 def lade_patienten(
@@ -503,6 +514,11 @@ def einsatz_aktualisieren(row_id: int, daten: dict) -> None:
 def einsatz_loeschen(row_id: int) -> None:
     with _db() as con:
         con.execute("DELETE FROM einsaetze WHERE id=?", (row_id,))
+    try:
+        from database.turso_sync import push_delete
+        push_delete(_EINSATZ_DB_PFAD, "einsaetze", row_id)
+    except Exception:
+        pass
 
 
 def lade_einsaetze(

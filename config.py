@@ -53,6 +53,18 @@ BACKUP_MAX_KEEP = 30    # Maximale Anzahl gespeicherter Backups
 # ─── JSON-Einstellungen ───────────────────────────────────────────────────────
 JSON_DIR = os.path.join(BASE_DIR, "json")
 
+# ─── Turso (SSOT) ────────────────────────────────────────────────────────────
+TURSO_URL   = "https://nesk-koboltze.aws-eu-west-1.turso.io"
+TURSO_TOKEN = (
+    "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9"
+    ".eyJhIjoicnciLCJnaWQiOiI5MmYxMzNiMS1jYmVkLTQ1NWEtOGU0MS00ZTUxYjYxMjQ0YTYi"
+    "LCJpYXQiOjE3NzM4ODgxNjQsInJpZCI6ImY5YTc0NzA1LTE4ZjktNGE2Ny1iNzkyLTM4Yzg4"
+    "MTY4N2E3NSJ9"
+    ".JSGexxBNRkcbdlAVPGAr8-P0mIiiDuaMWg4elSKf853-xGI5CzcZBxH-ozRLbVjTeM5EhZ6h"
+    "N0_OcOvqdVl0Cg"
+)
+TURSO_SYNC_INTERVAL = 30   # Sekunden zwischen automatischen Syncs
+
 # ─── SAP Fiori Design-Farben ─────────────────────────────────────────────────
 FIORI_BLUE        = "#0a6ed1"
 FIORI_LIGHT_BLUE  = "#eef4fa"

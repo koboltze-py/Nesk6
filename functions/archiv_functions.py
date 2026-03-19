@@ -9,7 +9,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import ARCHIV_DB_PATH
+from config import ARCHIV_DB_PATH, DB_PATH as _NESK3_DB_PATH
 from database.connection import db_cursor
 
 
@@ -180,6 +180,12 @@ def exportiere_in_archiv(
                 f"DELETE FROM uebergabe_protokolle WHERE id IN ({placeholders})",
                 list(protokoll_ids),
             )
+        try:
+            from database.turso_sync import push_delete
+            for pid in protokoll_ids:
+                push_delete(_NESK3_DB_PATH, "uebergabe_protokolle", pid)
+        except Exception:
+            pass
 
     finally:
         arch_conn.close()
