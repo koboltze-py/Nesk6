@@ -287,8 +287,10 @@ def list_restored_copies() -> list[dict]:
 # Gemeinsam.26-Ordner Backup
 # ---------------------------------------------------------------------------
 
-_GEMEINSAM_BACKUP_DIR   = os.path.join(BASE_DIR, "Backup Data", "gemeinsam_backups")
-_GEMEINSAM_BACKUP_LOKAL = r"C:\Daten\Backup Gemeinsam"
+# Beide Ziele sind lokale Pfade (kein OneDrive/SharePoint – 527 MB ZIPs überschreiten
+# das SharePoint-Sync-Limit von 250 MB und werden von OneDrive lokal gelöscht).
+_GEMEINSAM_BACKUP_DIR   = r"C:\Daten\Backup Gemeinsam"
+_GEMEINSAM_BACKUP_LOKAL = r"C:\Daten\Backup Gemeinsam 2"  # zweite lokale Kopie (optional)
 _GEMEINSAM_SRC = os.path.join(os.path.dirname(BASE_DIR))  # parent von Nesk3 = !Gemeinsam.26
 
 # Ordner die vom Gemeinsam-Backup AUSGESCHLOSSEN werden

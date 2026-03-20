@@ -129,7 +129,7 @@ def _taeglich_gemeinsam_backup():
         print(f"[WARNUNG] Tägliches Gemeinsam-Backup fehlgeschlagen: {e}")
 
 
-
+def main():
     # High-DPI Unterstützung für Qt6 (PySide6)
     # QT_AUTO_SCREEN_SCALE_FACTOR ist nur Qt5 – in Qt6 ist High-DPI standardmäßig aktiv.
     # PassThrough gibt den echten Skalierungsfaktor (z.B. 1.25 bei 125%) direkt weiter
