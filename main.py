@@ -79,6 +79,56 @@ def _db_startup_backup():
         print(f"[WARNUNG] DB-Backup fehlgeschlagen: {e}")
 
 
+def _taeglich_gemeinsam_backup():
+    """
+    Wird einmal täglich im Hintergrund ausgeführt (nach Fenster-Start).
+    Ablauf:
+      1. Prüft ob heute bereits ein Gemeinsam.26-Backup existiert → ggf. abbrechen
+         (prüft sowohl OneDrive-Ziel als auch lokale Kopie C:\\Daten\\Backup Gemeinsam\\)
+      2. Nesk3-Code-Backup (ZIP des App-Ordners)
+      3. Gemeinsam.26-Backup (ZIP; altes vorheriges wird automatisch gelöscht)
+    Alle Fehler werden als Warnung geloggt, nie als Exception weitergegeben.
+    """
+    try:
+        from backup.backup_manager import (
+            create_zip_backup, create_gemeinsam_backup,
+            _GEMEINSAM_BACKUP_DIR, _GEMEINSAM_BACKUP_LOKAL,
+        )
+        heute = datetime.now().strftime("%Y%m%d")
+        prefix = f"gemeinsam_{heute}"
+
+        # Prüfen ob heute bereits ein Backup existiert (OneDrive oder lokal)
+        for backup_dir in (_GEMEINSAM_BACKUP_DIR, _GEMEINSAM_BACKUP_LOKAL):
+            if not os.path.isdir(backup_dir):
+                continue
+            for fname in os.listdir(backup_dir):
+                if fname.startswith(prefix) and fname.endswith('.zip'):
+                    print(f"[INFO] Tägliches Gemeinsam-Backup bereits vorhanden: {fname}")
+                    return
+
+        print("[INFO] Tägliches Backup wird gestartet …")
+
+        # Schritt 1: Nesk3 Code-Backup erstellen
+        print("[INFO] 1/2 – Nesk3 Code-Backup …")
+        try:
+            zip_path = create_zip_backup()
+            print(f"[OK]   Nesk3 Code-Backup: {os.path.basename(zip_path)}")
+        except Exception as e:
+            print(f"[WARNUNG] Nesk3 Code-Backup fehlgeschlagen: {e}")
+
+        # Schritt 2: Gemeinsam.26-Backup (altes vorheriges wird automatisch gelöscht)
+        print("[INFO] 2/2 – Gemeinsam.26-Backup …")
+        result = create_gemeinsam_backup(inkrementell=False)
+        if result.get('erfolg'):
+            erste_zeile = result.get('meldung', '').splitlines()[0]
+            print(f"[OK]   Gemeinsam-Backup: {result.get('dateien_count')} Dateien – {erste_zeile}")
+        else:
+            print(f"[WARNUNG] Gemeinsam-Backup fehlgeschlagen: {result.get('meldung')}")
+
+    except Exception as e:
+        print(f"[WARNUNG] Tägliches Gemeinsam-Backup fehlgeschlagen: {e}")
+
+
 def main():
     # High-DPI Unterstützung für Qt6 (PySide6)
     # QT_AUTO_SCREEN_SCALE_FACTOR ist nur Qt5 – in Qt6 ist High-DPI standardmäßig aktiv.
@@ -233,6 +283,10 @@ def main():
     window = MainWindow()
     splash.finish(window)
     window.show()
+
+    # Tägliches Gemeinsam-Backup im Hintergrund (nach Fenster-Start, blockiert UI nicht)
+    threading.Thread(target=_taeglich_gemeinsam_backup, daemon=True).start()
+
     sys.exit(app.exec())
 
 

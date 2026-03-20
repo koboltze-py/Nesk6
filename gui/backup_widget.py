@@ -50,6 +50,10 @@ class BackupThread(QThread):
                 'zip_pfad': zip_path,
                 'meldung': 'Nesk3 Backup erstellt.' if zip_path else 'Fehler beim Backup.'
             }
+        elif self.backup_type == 'drk_daten':
+            result = backup_manager.create_drk_daten_backup(
+                progress_callback=self._progress_callback
+            )
         else:
             result = {'erfolg': False, 'meldung': 'Unbekannter Backup-Typ'}
         
@@ -102,6 +106,9 @@ class BackupWidget(QWidget):
 
         # ── Nesk3 Code Backup Gruppe ───────────────────────────────────
         self._build_nesk3_group(layout)
+
+        # ── DRK-Daten Backup (20 OneDrive-Ordner) ─────────────────────
+        self._build_drk_daten_group(layout)
 
     def _build_gemeinsam_group(self, parent_layout):
         """Erstellt die Gemeinsam.26 Backup Sektion."""
@@ -644,6 +651,9 @@ class BackupWidget(QWidget):
         # Automatische DB-Backups
         self._load_db_backups()
 
+        # DRK-Daten Backups
+        self._load_drk_daten_backups()
+
     def _create_gemeinsam_backup(self):
         """Erstellt ein inkrementelles Gemeinsam.26 Backup."""
         self._start_backup('gemeinsam', inkrementell=True)
@@ -827,3 +837,202 @@ class BackupWidget(QWidget):
                 self._load_backups()
             except Exception as e:
                 QMessageBox.critical(self, "Fehler", f"Fehler beim Löschen: {str(e)}")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # DRK-Daten Backup (20 OneDrive-Ordner)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _build_drk_daten_group(self, parent_layout):
+        """Erstellt die DRK-Daten Backup Sektion (20 Ordner aus !Gemeinsam.26)."""
+        grp = QGroupBox("🗂️ DRK-Daten Backup (20 Ordner)")
+        grp.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        grp.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #f5dce8;
+                border-radius: 6px;
+                margin-top: 8px;
+                padding: 12px;
+                background-color: #fffafa;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 6px;
+                color: #a40a3c;
+            }
+        """)
+        grp_layout = QVBoxLayout(grp)
+        grp_layout.setSpacing(12)
+
+        beschreibung = QLabel(
+            "Sichert 20 ausgewählte DRK-Ordner aus !Gemeinsam.26 als ZIP-Archiv.\n"
+            "Ziele: Nesk3/Backup DRK Daten/ und C:\\Daten\\Backup Daten DRK\\\n"
+            "Rotation: max. 5 ZIPs pro Tag, max. 7 Tage. "
+            "Offene Word/Excel-Dateien werden übersprungen."
+        )
+        beschreibung.setWordWrap(True)
+        beschreibung.setStyleSheet("color: #555; font-size: 11px; font-weight: normal;")
+        grp_layout.addWidget(beschreibung)
+
+        # Quell-Info Label (wird befüllt in _load_drk_daten_backups)
+        self._drk_info_label = QLabel("Lade Quell-Informationen...")
+        self._drk_info_label.setStyleSheet(
+            "background: #f9f0f3; padding: 8px; border-radius: 4px; font-size: 11px; font-weight: normal;"
+        )
+        grp_layout.addWidget(self._drk_info_label)
+
+        # Button-Zeile
+        btn_row = QHBoxLayout()
+
+        self._drk_backup_btn = QPushButton("🔴 DRK-Daten Backup erstellen")
+        self._drk_backup_btn.setMinimumHeight(36)
+        self._drk_backup_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #c0003c;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #a00030;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self._drk_backup_btn.clicked.connect(self._create_drk_daten_backup)
+        btn_row.addWidget(self._drk_backup_btn)
+
+        refresh_drk_btn = QPushButton("🔄 Aktualisieren")
+        refresh_drk_btn.setMinimumHeight(36)
+        refresh_drk_btn.setMaximumWidth(140)
+        refresh_drk_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e8e8e8;
+                color: #333;
+                border: none;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #d0d0d0;
+            }
+        """)
+        refresh_drk_btn.clicked.connect(self._load_drk_daten_backups)
+        btn_row.addWidget(refresh_drk_btn)
+
+        grp_layout.addLayout(btn_row)
+
+        # Backup-Liste (aus Datenbank)
+        self._drk_list = QListWidget()
+        self._drk_list.setMaximumHeight(180)
+        self._drk_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #e8c8d0;
+                border-radius: 4px;
+                background: white;
+                font-size: 11px;
+            }
+            QListWidget::item {
+                padding: 6px;
+                border-bottom: 1px solid #faf0f3;
+            }
+            QListWidget::item:hover {
+                background: #fff5f8;
+            }
+        """)
+        grp_layout.addWidget(self._drk_list)
+
+        parent_layout.addWidget(grp)
+
+    def _load_drk_daten_backups(self):
+        """Lädt DRK-Daten Backups aus DB und aktualisiert Anzeige."""
+        # Quell-Info
+        try:
+            info = backup_manager.drk_backup_quellordner_info()
+            n_vor = len(info.get("vorhandene", []))
+            n_feh = len(info.get("fehlende", []))
+            mb    = info.get("gesamt_mb", 0)
+            files = info.get("gesamt_dateien", 0)
+            ordner_text = f"📂 {n_vor}/20 Ordner gefunden | {files} Dateien | {mb} MB Quelldaten"
+            if n_feh:
+                fehlend_str = ", ".join(info.get("fehlende", []))
+                ordner_text += f"\n⚠️ Nicht gefunden: {fehlend_str}"
+            self._drk_info_label.setText(ordner_text)
+        except Exception as e:
+            self._drk_info_label.setText(f"⚠️ Quellinformationen nicht verfügbar: {e}")
+
+        # Backup-Liste
+        self._drk_list.clear()
+        try:
+            backups = backup_manager.list_drk_daten_backups()
+        except Exception:
+            backups = []
+
+        for b in backups[:20]:
+            status_icon = "✅" if b.get("zip_vorhanden") else "❌"
+            lokal_icon  = "💾" if b.get("pfad_lokal") else "  "
+            text = (
+                f"{status_icon} {b['datum_anzeige']}  |  {b['dateiname']}  |  "
+                f"{b['groesse_mb']} MB  |  {b['gesicherte_ordner']} Ordner  {lokal_icon}"
+            )
+            item = QListWidgetItem(text)
+            item.setData(Qt.ItemDataRole.UserRole, b)
+            if not b.get("zip_vorhanden"):
+                item.setForeground(QColor("#aaaaaa"))
+            self._drk_list.addItem(item)
+
+        if not backups:
+            leer = QListWidgetItem("Noch keine DRK-Daten Backups vorhanden")
+            leer.setFlags(Qt.ItemFlag.NoItemFlags)
+            leer.setForeground(Qt.GlobalColor.gray)
+            self._drk_list.addItem(leer)
+
+    def _create_drk_daten_backup(self):
+        """Startet den DRK-Daten Backup-Thread."""
+        if self._backup_thread and self._backup_thread.isRunning():
+            QMessageBox.warning(self, "Backup läuft", "Ein Backup läuft bereits.")
+            return
+
+        self._drk_backup_btn.setEnabled(False)
+
+        self._progress = QProgressDialog("DRK-Daten Backup wird erstellt...", None, 0, 100, self)
+        self._progress.setWindowTitle("DRK-Daten Backup")
+        self._progress.setMinimumDuration(0)
+        self._progress.setCancelButton(None)
+        self._progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._progress.show()
+
+        self._backup_thread = BackupThread('drk_daten')
+        self._backup_thread.finished.connect(self._on_drk_backup_finished)
+        self._backup_thread.progress.connect(self._on_backup_progress)
+        self._backup_thread.start()
+
+    def _on_drk_backup_finished(self, result: dict):
+        """Wird aufgerufen wenn DRK-Daten Backup fertig ist."""
+        self._progress.close()
+        self._drk_backup_btn.setEnabled(True)
+
+        if result.get('erfolg'):
+            skip = result.get('uebersprungene_dateien', 0)
+            if skip:
+                QMessageBox.warning(
+                    self,
+                    "DRK-Daten Backup abgeschlossen",
+                    result.get('meldung', 'Backup fertig.')
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "DRK-Daten Backup erfolgreich",
+                    result.get('meldung', 'Backup fertig.')
+                )
+            self._load_drk_daten_backups()
+        else:
+            QMessageBox.critical(
+                self,
+                "DRK-Daten Backup Fehler",
+                result.get('meldung', 'Unbekannter Fehler')
+            )

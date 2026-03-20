@@ -162,7 +162,16 @@ CREATE TABLE IF NOT EXISTS uebergabe_verspaetungen (
     soll_zeit       TEXT DEFAULT '',
     ist_zeit        TEXT DEFAULT ''
 );
-"""
+CREATE TABLE IF NOT EXISTS drk_daten_backup_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    dateiname       TEXT NOT NULL,
+    pfad_nesk       TEXT DEFAULT '',
+    pfad_lokal      TEXT DEFAULT '',
+    groesse_mb      REAL DEFAULT 0,
+    gesicherte_ordner INTEGER DEFAULT 0,
+    fehler_ordner   INTEGER DEFAULT 0,
+    erstellt_am     TEXT DEFAULT (datetime('now','localtime'))
+);"""
 
 _default_ordner = (
     r'C:\Users\DRKairport\OneDrive - Deutsches Rotes Kreuz - '
