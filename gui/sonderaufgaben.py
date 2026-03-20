@@ -137,6 +137,8 @@ class SonderaufgabenWidget(QWidget):
         self._nacht_bulmor:      list[str] = []
         self._tag_emobby:        list[str] = []
         self._nacht_emobby:      list[str] = []
+        self._tag_kat:           dict[str, str] = {}   # name → "T" oder "T10"
+        self._nacht_kat:         dict[str, str] = {}   # name → "N" oder "N10"
         self._dienstplan_geladen: bool = False
         self._dienstplan_pfad:   str  = ""
         self._fs_model: QFileSystemModel | None = None
@@ -467,11 +469,17 @@ class SonderaufgabenWidget(QWidget):
             else:
                 mitarbeiter = self._tag_mitarbeiter if is_tag else self._nacht_mitarbeiter
 
+            kat_dict = self._tag_kat if is_tag else self._nacht_kat
+
             combo = QComboBox()
             combo.setFixedHeight(30)
             combo.setStyleSheet(_combo_style())
             if mitarbeiter:
-                items = ["\u2014 bitte wählen \u2014"] + mitarbeiter
+                display_items = [
+                    f"{n} [{kat_dict[n]}]" if n in kat_dict else n
+                    for n in mitarbeiter
+                ]
+                items = ["\u2014 bitte wählen \u2014"] + display_items
                 if nur_bulmor:
                     items.append("a.D.")
                 combo.addItems(items)
@@ -563,11 +571,15 @@ class SonderaufgabenWidget(QWidget):
         line: QLineEdit = entry["line"]
         ist_bulmor = entry.get("nur_bulmor", False)
 
+        # Dienstkategorie-Suffix entfernen: "Müller [T10]" → "Müller"
+        import re as _re
+        clean_choice = _re.sub(r'\s+\[(?:T10?|N10?)\]$', '', choice)
+
         current = line.text().strip()
         if ist_bulmor and current and current not in ("Tag", "Nacht"):
-            line.setText(f"{current} / {choice}")
+            line.setText(f"{current} / {clean_choice}")
         else:
-            line.setText(choice)
+            line.setText(clean_choice)
 
     # ── Dienstplan laden ────────────────────────────────────────────────────
 
@@ -640,6 +652,8 @@ class SonderaufgabenWidget(QWidget):
             nacht_mitarbeiter: list[str] = []
             tag_bulmor:        list[str] = []
             nacht_bulmor:      list[str] = []
+            tag_kat:           dict[str, str] = {}   # name → "T" oder "T10"
+            nacht_kat:         dict[str, str] = {}   # name → "N" oder "N10"
 
             skip_words = ["name", "mitarbeiter", "datum", "uhrzeit", "von", "bis",
                           "dienst", "schicht", "pause", "station", "terminal", "funktion"]
@@ -672,14 +686,23 @@ class SonderaufgabenWidget(QWidget):
                 except Exception:
                     pass
 
-                # Dienstart ermitteln
+                # Dienstart + Kategorie ermitteln
                 dienstart = None
+                kat = ""
                 if dienst_cell.value and isinstance(dienst_cell.value, str):
                     val = str(dienst_cell.value).strip().upper()
-                    if val in ("T", "T10", "DT", "DT3", "DT10"):
+                    if val in ("T", "DT", "DT3"):
                         dienstart = "tag"
-                    elif val in ("N", "NF", "N10", "DN", "DN3", "DN10"):
+                        kat = "T"
+                    elif val in ("T10", "DT10"):
+                        dienstart = "tag"
+                        kat = "T10"
+                    elif val in ("N", "NF", "DN", "DN3"):
                         dienstart = "nacht"
+                        kat = "N"
+                    elif val in ("N10", "DN10"):
+                        dienstart = "nacht"
+                        kat = "N10"
 
                 if dienstart is None:
                     continue
@@ -692,10 +715,12 @@ class SonderaufgabenWidget(QWidget):
 
                 if dienstart == "tag" and nachname not in tag_mitarbeiter:
                     tag_mitarbeiter.append(nachname)
+                    tag_kat[nachname] = kat
                     if is_bulmor and nachname not in tag_bulmor:
                         tag_bulmor.append(nachname)
                 elif dienstart == "nacht" and nachname not in nacht_mitarbeiter:
                     nacht_mitarbeiter.append(nachname)
+                    nacht_kat[nachname] = kat
                     if is_bulmor and nachname not in nacht_bulmor:
                         nacht_bulmor.append(nachname)
 
@@ -714,6 +739,8 @@ class SonderaufgabenWidget(QWidget):
             self._nacht_bulmor      = nacht_bulmor
             self._tag_emobby        = tag_emobby
             self._nacht_emobby      = nacht_emobby
+            self._tag_kat           = tag_kat
+            self._nacht_kat         = nacht_kat
             self._dienstplan_geladen = True
             self._btn_open_dienstplan.setEnabled(True)
 
@@ -950,6 +977,8 @@ class SonderaufgabenWidget(QWidget):
         self._nacht_bulmor      = []
         self._tag_emobby        = []
         self._nacht_emobby      = []
+        self._tag_kat           = {}
+        self._nacht_kat         = {}
         self._build_form()
 
     # ── Zufall-Verteilung Nacht ───────────────────────────────────────────────
@@ -1020,20 +1049,48 @@ class SonderaufgabenWidget(QWidget):
         tag_alle_used:    list[str] = []
         tag_emobby_used:  list[str] = []
 
+        # Bevorzugte Pools: T10 → Sauberkeit, T → BTW Check
+        tag_t10_pool = [n for n in self._tag_mitarbeiter if self._tag_kat.get(n) == "T10"]
+        tag_t_pool   = [n for n in self._tag_mitarbeiter if self._tag_kat.get(n) == "T"]
+        random.shuffle(tag_t10_pool)
+        random.shuffle(tag_t_pool)
+        tag_t10_used: list[str] = []
+        tag_t_used:   list[str] = []
+
         # ── Nacht-Pools ────────────────────────────────────────────────────
         nacht_bulmor_pool = _make_pool(self._nacht_bulmor, self._nacht_mitarbeiter)
         nacht_alle_pool   = _make_pool(self._nacht_mitarbeiter)
         nacht_bulmor_used: list[str] = []
         nacht_alle_used:   list[str] = []
 
+        # Bevorzugter Pool: N10 → Sauberkeit Nacht
+        nacht_n10_pool = [n for n in self._nacht_mitarbeiter if self._nacht_kat.get(n) == "N10"]
+        random.shuffle(nacht_n10_pool)
+        nacht_n10_used: list[str] = []
+
         def _set_entry(combo: QComboBox, line: QLineEdit, text: str):
-            """Combo + Textfeld direkt setzen ohne Signal-Kaskade."""
+            """Combo + Textfeld direkt setzen ohne Signal-Kaskade.
+            Sucht zuerst exakt, dann ohne Kategorie-Suffix (z.B. 'Müller [T10]' → 'Müller')."""
             combo.blockSignals(True)
             idx = combo.findText(text)
             if idx >= 0:
                 combo.setCurrentIndex(idx)
             combo.blockSignals(False)
             line.setText(text)
+
+        def _set_entry_name(combo: QComboBox, line: QLineEdit, plain_name: str,
+                            kat_dict: dict):
+            """Combo per Nachname setzen (sucht 'Name [Kat]'-Eintrag), Textfeld = plain_name."""
+            kat = kat_dict.get(plain_name, "")
+            display = f"{plain_name} [{kat}]" if kat else plain_name
+            combo.blockSignals(True)
+            idx = combo.findText(display)
+            if idx < 0:
+                idx = combo.findText(plain_name)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+            line.setText(plain_name)
 
         for key, entry in self._entries.items():
             combo: QComboBox = entry["combo"]
@@ -1050,18 +1107,35 @@ class SonderaufgabenWidget(QWidget):
                     else:
                         chosen = _pick(tag_bulmor_pool, tag_bulmor_used)
                         if chosen:
-                            _set_entry(combo, line, chosen)
+                            _set_entry_name(combo, line, chosen, self._tag_kat)
 
                 elif aufgabe == "E-mobby Check":
                     chosen = _pick(tag_emobby_pool, tag_emobby_used)
                     if chosen:
-                        _set_entry(combo, line, chosen)
+                        _set_entry_name(combo, line, chosen, self._tag_kat)
+
+                elif aufgabe == "Sauberkeit Station":
+                    # Bevorzugt: T10-Mitarbeiter; Fallback: alle
+                    if tag_t10_pool:
+                        chosen = _pick(tag_t10_pool, tag_t10_used)
+                    else:
+                        chosen = _pick(tag_alle_pool, tag_alle_used)
+                    if chosen:
+                        _set_entry_name(combo, line, chosen, self._tag_kat)
+
+                elif aufgabe == "BTW Check + Sauberkeit":
+                    # Bevorzugt: T-Mitarbeiter (nicht T10); Fallback: alle
+                    if tag_t_pool:
+                        chosen = _pick(tag_t_pool, tag_t_used)
+                    else:
+                        chosen = _pick(tag_alle_pool, tag_alle_used)
+                    if chosen:
+                        _set_entry_name(combo, line, chosen, self._tag_kat)
 
                 else:
-                    # Sauberkeit Station + BTW Check + Sauberkeit
                     chosen = _pick(tag_alle_pool, tag_alle_used)
                     if chosen:
-                        _set_entry(combo, line, chosen)
+                        _set_entry_name(combo, line, chosen, self._tag_kat)
 
             elif key.endswith("_nacht"):
                 aufgabe = key[: -len("_nacht")]
@@ -1081,12 +1155,19 @@ class SonderaufgabenWidget(QWidget):
                     else:
                         chosen = _pick(nacht_bulmor_pool, nacht_bulmor_used)
                         if chosen:
-                            _set_entry(combo, line, chosen)
+                            _set_entry_name(combo, line, chosen, self._nacht_kat)
+                elif aufgabe == "Sauberkeit Station":
+                    # Bevorzugt: N10-Mitarbeiter; Fallback: alle
+                    if nacht_n10_pool:
+                        chosen = _pick(nacht_n10_pool, nacht_n10_used)
+                    else:
+                        chosen = _pick(nacht_alle_pool, nacht_alle_used)
+                    if chosen:
+                        _set_entry_name(combo, line, chosen, self._nacht_kat)
                 else:
-                    # Sauberkeit Station
                     chosen = _pick(nacht_alle_pool, nacht_alle_used)
                     if chosen:
-                        _set_entry(combo, line, chosen)
+                        _set_entry_name(combo, line, chosen, self._nacht_kat)
 
     # ── Refresh (wird beim Tab-Wechsel aufgerufen) ──────────────────────────
 
