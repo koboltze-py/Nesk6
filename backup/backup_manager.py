@@ -658,22 +658,34 @@ def is_restore_pending() -> bool:
 _CODE_BACKUP_DIR = os.path.join(BASE_DIR, "Backup Data")
 
 # Ordner/Muster die beim ZIP-Backup NICHT einbezogen werden sollen
-_ZIP_EXCLUDE_DIRS  = {'__pycache__', '.git', 'Backup Data', 'backup', 'build_tmp', 'Exe'}
-_ZIP_EXCLUDE_EXTS  = {'.pyc', '.pyo'}
+_ZIP_EXCLUDE_DIRS  = {
+    '__pycache__', '.git', 'Backup Data', 'backup', 'build_tmp', 'Exe',
+    # Große Datenordner – werden NICHT in den Code-Backup aufgenommen
+    'Daten', 'database SQL', 'Database SQL Backup', 'Databas SQL Backup',
+    'Backup', 'build', 'turso exe', 'WebNesk', 'MD 13.03',
+    'Markddown 02.03', 'markdown', 'docs', 'demo', 'json',
+    '_backup_v29_Code19Mail',
+}
+_ZIP_EXCLUDE_EXTS  = {'.pyc', '.pyo', '.exe', '.dll', '.zip'}
 
 
 def create_zip_backup() -> str:
     """
     Erstellt ein vollständiges ZIP-Backup des Nesk3-Ordners (alle .py, .db, .ini, .json Dateien).
-    Speichert das ZIP unter 'Backup Data/Nesk3_backup_<timestamp>.zip'.
+    Speichert das ZIP unter 'C:\\Daten\\Backup Nesk3\\Nesk3_backup_<timestamp>.zip'.
     Gibt den vollständigen ZIP-Pfad zurück.
     """
-    os.makedirs(_CODE_BACKUP_DIR, exist_ok=True)
+    # Lokal außerhalb von OneDrive speichern – kein Pfadlängenproblem
+    local_backup_dir = r"C:\Daten\Backup Nesk3"
+    os.makedirs(local_backup_dir, exist_ok=True)
+
     stamp    = datetime.now().strftime('%Y%m%d_%H%M%S')
     zip_name = f"Nesk3_backup_{stamp}.zip"
-    zip_path = os.path.join(_CODE_BACKUP_DIR, zip_name)
+    zip_path = os.path.join(local_backup_dir, zip_name)
 
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+    skipped = 0
+    count   = 0
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
         for root, dirs, files in os.walk(BASE_DIR):
             # Ausgeschlossene Ordner überspringen (in-place modifizieren)
             dirs[:] = [d for d in dirs if d not in _ZIP_EXCLUDE_DIRS]
@@ -682,30 +694,41 @@ def create_zip_backup() -> str:
                     continue
                 full_path = os.path.join(root, fname)
                 arcname   = os.path.relpath(full_path, BASE_DIR)
-                zf.write(full_path, arcname)
+                try:
+                    zf.write(_lp(full_path), arcname)
+                    count += 1
+                except Exception:
+                    skipped += 1
 
+    if skipped:
+        print(f"[Backup] ZIP erstellt: {zip_path} ({count} Dateien, {skipped} übersprungen)")
     return zip_path
 
 
 def list_zip_backups() -> list[dict]:
     """
-    Gibt eine Liste aller ZIP-Backups im Backup-Data-Ordner zurück.
+    Gibt eine Liste aller ZIP-Backups zurück (lokal C:\\Daten\\Backup Nesk3\\ und legacy Backup Data/).
     Jedes Element: {'dateiname', 'pfad', 'groesse_kb', 'erstellt'}
     """
-    if not os.path.isdir(_CODE_BACKUP_DIR):
-        return []
     result = []
-    for fname in sorted(os.listdir(_CODE_BACKUP_DIR), reverse=True):
-        if fname.lower().endswith('.zip'):
-            fpath = os.path.join(_CODE_BACKUP_DIR, fname)
-            size  = os.path.getsize(fpath)
-            mtime = datetime.fromtimestamp(os.path.getmtime(fpath))
-            result.append({
-                'dateiname':  fname,
-                'pfad':       fpath,
-                'groesse_kb': round(size / 1024, 1),
-                'erstellt':   mtime.strftime('%d.%m.%Y %H:%M'),
-            })
+    search_dirs = [r"C:\Daten\Backup Nesk3", _CODE_BACKUP_DIR]
+    seen_names: set[str] = set()
+    for search_dir in search_dirs:
+        if not os.path.isdir(search_dir):
+            continue
+        for fname in sorted(os.listdir(search_dir), reverse=True):
+            if fname.lower().endswith('.zip') and fname not in seen_names:
+                seen_names.add(fname)
+                fpath = os.path.join(search_dir, fname)
+                size  = os.path.getsize(fpath)
+                mtime = datetime.fromtimestamp(os.path.getmtime(fpath))
+                result.append({
+                    'dateiname':  fname,
+                    'pfad':       fpath,
+                    'groesse_kb': round(size / 1024, 1),
+                    'erstellt':   mtime.strftime('%d.%m.%Y %H:%M'),
+                })
+    result.sort(key=lambda x: x['erstellt'], reverse=True)
     return result
 
 
